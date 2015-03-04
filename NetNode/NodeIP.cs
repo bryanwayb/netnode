@@ -26,6 +26,26 @@ namespace NetNodelet
 		private List<IPEndPoint> BindableIPs = new List<IPEndPoint>();
 		private List<IPEndPoint> ConnectableIPs = new List<IPEndPoint>();
 
+		public void AddNodeIP(byte[] ipAddress, int port)
+		{
+			AddNodeIP(new NodeIP(ipAddress, new int[] { port }));
+		}
+
+		public void AddNodeIP(byte[] ipAddress, int port, NodeIPType type)
+		{
+			AddNodeIP(new NodeIP(ipAddress, new int[] { port }), type);
+		}
+
+		public void AddNodeIP(byte[] ipAddress, int[] ports)
+		{
+			AddNodeIP(new NodeIP(ipAddress, ports));
+		}
+
+		public void AddNodeIP(byte[] ipAddress, int[] ports, NodeIPType type)
+		{
+			AddNodeIP(new NodeIP(ipAddress, ports), type);
+		}
+
 		public void AddNodeIP(NodeIP ip)
 		{
 			AddNodeIP(ip, NodeIPType.Bindable);
@@ -72,6 +92,23 @@ namespace NetNodelet
 							ipList.Add(new IPEndPoint(new IPAddress(ip.ip), port));
 						}
 					}
+				}
+			}
+		}
+
+		public void RemoveNodeIP(byte[] ip, NodeIPType type) // Removes all ports binded to IP specified
+		{
+			List<IPEndPoint> ipList = type == NodeIPType.Bindable ? BindableIPs : ConnectableIPs;
+			for(int i = 0;i < ipList.Count;)
+			{
+				byte[] epIP = ipList[i].Address.GetAddressBytes();
+				if(epIP.Length != ip.Length || memcmp(epIP, ip, epIP.Length) != 0)
+				{
+					i++;
+				}
+				else
+				{
+					ipList.RemoveAt(i);
 				}
 			}
 		}
