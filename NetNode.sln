@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2013
+VisualStudioVersion = 12.0.31101.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetNode", "NetNode\NetNode.csproj", "{76587BBE-5DE7-415F-A66D-B8DB8F5F7F92}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestUnits", "TestUnits\TestUnits.csproj", "{D8D42E40-983D-4ABE-BF56-0026D21C4818}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestApplication", "TestApplication\TestApplication.csproj", "{546FBD31-7C74-4193-A6E5-18FD315A67E5}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{76587BBE-5DE7-415F-A66D-B8DB8F5F7F92}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{76587BBE-5DE7-415F-A66D-B8DB8F5F7F92}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{76587BBE-5DE7-415F-A66D-B8DB8F5F7F92}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{76587BBE-5DE7-415F-A66D-B8DB8F5F7F92}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D8D42E40-983D-4ABE-BF56-0026D21C4818}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D8D42E40-983D-4ABE-BF56-0026D21C4818}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D8D42E40-983D-4ABE-BF56-0026D21C4818}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D8D42E40-983D-4ABE-BF56-0026D21C4818}.Release|Any CPU.Build.0 = Release|Any CPU
+		{546FBD31-7C74-4193-A6E5-18FD315A67E5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{546FBD31-7C74-4193-A6E5-18FD315A67E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{546FBD31-7C74-4193-A6E5-18FD315A67E5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{546FBD31-7C74-4193-A6E5-18FD315A67E5}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
