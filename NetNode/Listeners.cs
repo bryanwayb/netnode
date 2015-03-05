@@ -1,6 +1,6 @@
 ﻿using System.Collections;
 
-namespace NetNodelet
+namespace NetNode
 {
 	public delegate byte[] NodeFunc(byte[] param);
 

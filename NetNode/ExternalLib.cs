@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace NetNodelet
+namespace NetNode
 {
 	public partial class Node
 	{

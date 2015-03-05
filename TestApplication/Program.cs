@@ -10,15 +10,11 @@ namespace TestApplication
 	{
 		static void Main(string[] args)
 		{
-			NetNodelet.Node.Default.AddNodeIP(new NetNodelet.NodeIP(new byte[] { 127, 0, 0, 1 }, new int[] { 9090, 8081 }));
+			NetNode.Node.Default.AddNodeIP(new NetNode.NodeIP(new byte[] { 127, 0, 0, 1 }, new int[] { 9090, 8081 }));
 
-			foreach(int i in NetNodelet.Node.Default.GetNodeIP(new byte[] { 127, 0, 0, 1 }, NetNodelet.NodeIPType.Bindable).ports)
+			foreach(NetNode.NodeIP node in NetNode.Node.Default.GetNodeIP(NetNode.NodeIPType.Bindable))
 			{
-				Console.WriteLine(i);
-			}
-
-			foreach(NetNodelet.NodeIP node in NetNodelet.Node.Default.GetNodeIP(NetNodelet.NodeIPType.Bindable))
-			{
+				Console.Write("Binded IP:\t");
 				foreach(byte b in node.ip)
 				{
 					Console.Write(b.ToString() + " ");
@@ -26,15 +22,18 @@ namespace TestApplication
 				Console.WriteLine();
 				foreach(int i in node.ports)
 				{
-					Console.WriteLine(i);
+					Console.WriteLine("\tPort:\t" + i);
 				}
+				Console.WriteLine();
 			}
 
-			NetNodelet.Node.Default.AddListener("ThisIsATest", delegate(byte[] param)
+			NetNode.Node.Default.AddListener("ThisIsATest", delegate(byte[] param)
 			{
 				Console.WriteLine("Here");
 				return null;
 			});
+
+			NetNode.Node.Default.StartServer();
 		}
 	}
 }

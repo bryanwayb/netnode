@@ -1,6 +1,6 @@
 ﻿using System.Text;
 
-namespace NetNodelet
+namespace NetNode
 {
 	public struct NodePayload
 	{
@@ -18,5 +18,13 @@ namespace NetNodelet
 		public static Node Default = new Node();
 
 		private Encoding Encoder = Encoding.UTF8;
+		public void SetEncoder(Encoding encoder)
+		{
+			this.Encoder = encoder;
+		}
+		public Encoding GetEncoder()
+		{
+			return Encoder;
+		}
 	}
 }

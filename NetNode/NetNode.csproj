@@ -42,6 +42,7 @@
     <Compile Include="Listeners.cs" />
     <Compile Include="NodeIP.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Server.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System" />

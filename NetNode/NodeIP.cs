@@ -2,7 +2,7 @@
 using System.Linq;
 using System.Net;
 
-namespace NetNodelet
+namespace NetNode
 {
 	public struct NodeIP
 	{
