@@ -1,10 +1,17 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 
 namespace NetNodelet
 {
 	public struct NodeIP
 	{
+		public NodeIP(byte[] ip, int port)
+		{
+			this.ip = ip;
+			this.ports = new int[] { port };
+		}
+
 		public NodeIP(byte[] ip, int[] ports)
 		{
 			this.ip = ip;
@@ -28,12 +35,12 @@ namespace NetNodelet
 
 		public void AddNodeIP(byte[] ipAddress, int port)
 		{
-			AddNodeIP(new NodeIP(ipAddress, new int[] { port }));
+			AddNodeIP(new NodeIP(ipAddress, port));
 		}
 
 		public void AddNodeIP(byte[] ipAddress, int port, NodeIPType type)
 		{
-			AddNodeIP(new NodeIP(ipAddress, new int[] { port }), type);
+			AddNodeIP(new NodeIP(ipAddress, port), type);
 		}
 
 		public void AddNodeIP(byte[] ipAddress, int[] ports)
@@ -53,7 +60,7 @@ namespace NetNodelet
 
 		public void AddNodeIP(NodeIP ip, NodeIPType type)
 		{
-			List<IPEndPoint> ipList = type == NodeIPType.Bindable ? BindableIPs : ConnectableIPs;
+			List<IPEndPoint> ipList = GetRelevantIPList(type);
 			if(ip.ip != null && ip.ports != null && ip.ports.Length > 0)
 			{
 				bool alreadyExists = false;
@@ -96,21 +103,151 @@ namespace NetNodelet
 			}
 		}
 
-		public void RemoveNodeIP(byte[] ip, NodeIPType type) // Removes all ports binded to IP specified
+		public NodeIP GetNodeIP(byte[] ip)
 		{
-			List<IPEndPoint> ipList = type == NodeIPType.Bindable ? BindableIPs : ConnectableIPs;
-			for(int i = 0;i < ipList.Count;)
+			return GetNodeIP(ip, NodeIPType.Bindable);
+		}
+
+		public NodeIP GetNodeIP(byte[] ip, NodeIPType type)
+		{
+			List<IPEndPoint> ipList = GetRelevantIPList(type);
+
+			List<int> ports = new List<int>();
+			if(ip != null)
 			{
-				byte[] epIP = ipList[i].Address.GetAddressBytes();
-				if(epIP.Length != ip.Length || memcmp(epIP, ip, epIP.Length) != 0)
+				foreach(IPEndPoint endpoint in ipList)
 				{
-					i++;
-				}
-				else
-				{
-					ipList.RemoveAt(i);
+					byte[] epIP = endpoint.Address.GetAddressBytes();
+					if(epIP.Length == ip.Length && memcmp(epIP, ip, epIP.Length) == 0)
+					{
+						bool addable = true;
+						foreach(int port in ports)
+						{
+							if(endpoint.Port == port)
+							{
+								addable = false;
+							}
+						}
+
+						if(addable)
+						{
+							ports.Add(endpoint.Port);
+						}
+					}
 				}
 			}
+
+			return new NodeIP(ip, ports.ToArray());
+		}
+
+		public NodeIP[] GetNodeIP()
+		{
+			return GetNodeIP(NodeIPType.Bindable);
+		}
+
+		public NodeIP[] GetNodeIP(NodeIPType type)
+		{
+			List<IPEndPoint> ipList = GetRelevantIPList(type);
+			List<NodeIP> ret = new List<NodeIP>();
+
+			foreach(IPEndPoint endpoint in ipList)
+			{
+				byte[] epIP = endpoint.Address.GetAddressBytes();
+
+				bool addable = true;
+				foreach(NodeIP node in ret)
+				{
+					if(node.ip.Length == epIP.Length && memcmp(node.ip, epIP, epIP.Length) == 0)
+					{
+						addable = false;
+						break;
+					}
+				}
+
+				if(addable)
+				{
+					ret.Add(GetNodeIP(epIP, type));
+				}
+			}
+
+			return ret.ToArray();
+		}
+
+		public void RemoveNodeIP(byte[] ip)
+		{
+			RemoveNodeIP(ip, NodeIPType.Bindable);
+		}
+
+		public void RemoveNodeIP(byte[] ip, NodeIPType type)
+		{
+			RemoveNodeIP(new NodeIP(ip, null), type);
+		}
+
+		public void RemoveNodeIP(byte[] ip, int port)
+		{
+			RemoveNodeIP(ip, port, NodeIPType.Bindable);
+		}
+
+		public void RemoveNodeIP(byte[] ip, int port, NodeIPType type)
+		{
+			RemoveNodeIP(new NodeIP(ip, port), type);
+		}
+
+		public void RemoveNodeIP(byte[] ip, int[] ports)
+		{
+			RemoveNodeIP(ip, ports, NodeIPType.Bindable);
+		}
+
+		public void RemoveNodeIP(byte[] ip, int[] ports, NodeIPType type)
+		{
+			RemoveNodeIP(new NodeIP(ip, ports), type);
+		}
+
+		public void RemoveNodeIP(NodeIP ip)
+		{
+			RemoveNodeIP(ip, NodeIPType.Bindable);
+		}
+
+		public void RemoveNodeIP(NodeIP ip, NodeIPType type)
+		{
+			List<IPEndPoint> ipList = GetRelevantIPList(type);
+			if(ip.ip != null)
+			{
+				bool portsSpecified = ip.ports != null && ip.ports.Length > 0;
+				for(int i = 0;i < ipList.Count;)
+				{
+					byte[] epIP = ipList[i].Address.GetAddressBytes();
+					if(epIP.Length == ip.ip.Length && memcmp(epIP, ip.ip, epIP.Length) == 0)
+					{
+						bool remove = !portsSpecified;
+
+						if(portsSpecified)
+						{
+							foreach(int port in ip.ports)
+							{
+								if(port == ipList[i].Port)
+								{
+									remove = true;
+									break;
+								}
+							}
+						}
+
+						if(remove)
+						{
+							ipList.RemoveAt(i);
+							continue;
+						}
+					}
+
+					i++;
+				}
+			}
+		}
+
+		private List<IPEndPoint> GetRelevantIPList(NodeIPType type)
+		{
+			return type == NodeIPType.Bindable ? BindableIPs : ConnectableIPs;
 		}
 	}
 }
