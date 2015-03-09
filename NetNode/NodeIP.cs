@@ -22,6 +22,28 @@ namespace NetNode
 		public int[] ports;		// Array of ports that are to be binded on the relating IP address
 	}
 
+	public struct NodePortIPLink
+	{
+		public NodePortIPLink(byte[] ip, int port)
+		{
+			this.ip = ip;
+			this.port = port;
+		}
+
+		public bool Equals(NodePortIPLink compareTo)
+		{
+			return this.port == compareTo.port && this.ip != null && compareTo.ip != null && this.ip.Length == compareTo.ip.Length && Lib.memcmp(this.ip, compareTo.ip, this.ip.Length) == 0;
+		}
+
+		public override int GetHashCode()
+		{
+			return ip.Sum(k => k) + port;
+		}
+
+		public byte[] ip;
+		public int port;
+	}
+
 	public enum NodeIPType
 	{
 		Bindable = 1,
@@ -71,7 +93,7 @@ namespace NetNode
 						foreach(IPEndPoint endpoint in ipList)
 						{
 							byte[] epIP = endpoint.Address.GetAddressBytes();
-							alreadyExists = epIP.Length == ip.ip.Length && memcmp(epIP, ip.ip, epIP.Length) == 0;
+							alreadyExists = epIP.Length == ip.ip.Length && Lib.memcmp(epIP, ip.ip, epIP.Length) == 0;
 
 							if(alreadyExists)
 							{
@@ -88,7 +110,7 @@ namespace NetNode
 						foreach(IPEndPoint endpoint in ipList)
 						{
 							byte[] epIP = endpoint.Address.GetAddressBytes();
-							if(portExists = epIP.Length == ip.ip.Length && memcmp(epIP, ip.ip, epIP.Length) == 0 && endpoint.Port == port)
+							if(portExists = epIP.Length == ip.ip.Length && Lib.memcmp(epIP, ip.ip, epIP.Length) == 0 && endpoint.Port == port)
 							{
 								break;
 							}
@@ -118,7 +140,7 @@ namespace NetNode
 				foreach(IPEndPoint endpoint in ipList)
 				{
 					byte[] epIP = endpoint.Address.GetAddressBytes();
-					if(epIP.Length == ip.Length && memcmp(epIP, ip, epIP.Length) == 0)
+					if(epIP.Length == ip.Length && Lib.memcmp(epIP, ip, epIP.Length) == 0)
 					{
 						bool addable = true;
 						foreach(int port in ports)
@@ -157,7 +179,7 @@ namespace NetNode
 				bool addable = true;
 				foreach(NodeIP node in ret)
 				{
-					if(node.ip.Length == epIP.Length && memcmp(node.ip, epIP, epIP.Length) == 0)
+					if(node.ip.Length == epIP.Length && Lib.memcmp(node.ip, epIP, epIP.Length) == 0)
 					{
 						addable = false;
 						break;
@@ -217,7 +239,7 @@ namespace NetNode
 				for(int i = 0;i < ipList.Count;)
 				{
 					byte[] epIP = ipList[i].Address.GetAddressBytes();
-					if(epIP.Length == ip.ip.Length && memcmp(epIP, ip.ip, epIP.Length) == 0)
+					if(epIP.Length == ip.ip.Length && Lib.memcmp(epIP, ip.ip, epIP.Length) == 0)
 					{
 						bool remove = !portsSpecified;
 
@@ -248,6 +270,18 @@ namespace NetNode
 		private List<IPEndPoint> GetRelevantIPList(NodeIPType type)
 		{
 			return type == NodeIPType.Bindable ? BindableIPs : ConnectableIPs;
+		}
+	}
+
+	public class NodePortIPLinkArrayComparer : IEqualityComparer<NodePortIPLink>
+	{
+		public bool Equals(NodePortIPLink left, NodePortIPLink right)
+		{
+			return left.Equals(right);
+		}
+		public int GetHashCode(NodePortIPLink key)
+		{
+			return key.GetHashCode();
 		}
 	}
 }

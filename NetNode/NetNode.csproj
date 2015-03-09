@@ -22,6 +22,8 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <DocumentationFile>
+    </DocumentationFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -31,14 +33,20 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <DocumentationFile>bin\Release\NetNode.XML</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup />
   <PropertyGroup>
     <StartupObject />
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Client.cs" />
     <Compile Include="Core.cs" />
     <Compile Include="ExternalLib.cs" />
+    <Compile Include="Filters.cs" />
+    <Compile Include="Filter\Base.cs" />
+    <Compile Include="Filter\ClientFilter.cs" />
+    <Compile Include="Filter\ServerFilter.cs" />
     <Compile Include="Listeners.cs" />
     <Compile Include="NodeIP.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

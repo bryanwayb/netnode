@@ -2,9 +2,9 @@
 
 namespace NetNode
 {
-	public partial class Node
+	static class Lib
 	{
 		[DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
-		private static extern int memcmp(byte[] b1, byte[] b2, long count); // We need this for fast memory comparing
+		public static extern int memcmp(byte[] b1, byte[] b2, long count); // We need this for fast memory comparing
 	}
 }

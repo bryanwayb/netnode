@@ -18,60 +18,45 @@ namespace NetNode
 
 	public partial class Node
 	{
+		private void d(string s, string t)
+		{
+			Console.WriteLine("[{0}]: {1}", s, t);
+		}
+
 		private ServerStatus serverStatus = ServerStatus.Stopped;
 		private List<Thread> serverListenerPool = new List<Thread>();
 
 		private struct ServerListenerParameter
 		{
-			public ServerListenerParameter(Node instance, IPEndPoint endpoint)
+			public ServerListenerParameter(Node instance, IPEndPoint endpoint, Thread thread)
 			{
 				this.instance = instance;
 				this.endpoint = endpoint;
+				this.thread = thread;
 			}
 
 			public Node instance;
 			public IPEndPoint endpoint;
+			public Thread thread;
 		}
 
-		public void StartServer() // Starts the server listen threads
+		public void StartServer()
 		{
 			lock(this)
 			{
+				d("SERVER", "Server starting");
 				if(serverStatus != ServerStatus.Stopped)
 				{
-					// TODO: Throw an exception here
+					throw new InvalidOperationException("NetNode server can only be started from a stopped state");
 				}
-				if(BindableIPs != null && BindableIPs.Count > 0)
+				else if(BindableIPs != null && BindableIPs.Count > 0)
 				{
 					serverStatus = ServerStatus.Starting;
 					foreach(IPEndPoint endpoint in BindableIPs)
 					{
 						Thread listener = new Thread(ServerListenerThread);
 						serverListenerPool.Add(listener);
-						listener.Start(new ServerListenerParameter(this, endpoint));
-
-						/*serverWorkerPool.Add(new Thread(delegate(object ip)
-						{
-							Socket socketListener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp); // TODO: Work on this here
-
-							try
-							{
-								socketListener.Bind((IPEndPoint)ip);
-								socketListener.Listen(10);
-								Console.WriteLine("Waiting for connection...");
-
-								Socket handler = socketListener.Accept();
-
-								byte[] bytes = new byte[1024];
-								handler.Receive(bytes);
-
-								Console.WriteLine("Text received : {0}", bytes);
-							}
-							catch(Exception ex)
-							{
-								Console.WriteLine("Error: " + ex.ToString());
-							}
-						}));*/
+						listener.Start(new ServerListenerParameter(this, endpoint, listener));
 					}
 				}
 			}
@@ -80,8 +65,6 @@ namespace NetNode
 		private object listenerThreadLock = new object(); // Use this for locking the listener threads
 		private void ServerListenerThread(object obj)
 		{
-			Console.WriteLine("Starting server listener...");
-
 			lock(listenerThreadLock)
 			{
 				if(serverListenerPool.Count == BindableIPs.Count && serverStatus != ServerStatus.Started)
@@ -89,34 +72,93 @@ namespace NetNode
 					serverStatus = ServerStatus.Started;
 				}
 			}
-			
+
 			ServerListenerParameter param = (ServerListenerParameter)obj;
 
-			Socket socketListener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp); // TODO: Work on this here
+			d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " listener starting");
 
 			try
 			{
+				Socket socketListener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
 				socketListener.Bind(param.endpoint);
-				socketListener.Listen(10);
+				socketListener.Listen(Filters.ApplyFilter<int>(param.endpoint.Address.GetAddressBytes(), param.endpoint.Port, typeof(Filter.MaxPendingQueue), 10));
+				d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " connection open to incomming connections");
 
 				while(serverStatus != ServerStatus.Stopping)
 				{
-					Console.WriteLine("waiting...");
+					d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " ...waiting to connect...");
 					Socket incomming = socketListener.Accept();
+					d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " incomming connection established");
 
-					// This is test code.
-					byte[] b = new byte[102400];
-					int size = incomming.Receive(b);
-					String t = param.instance.Encoder.GetString(b, 0, size);
-					Console.WriteLine(t);
+					byte[] buffer = new byte[NodeMagicPayload.Length];
+					int bufferSize = incomming.Receive(buffer);
+					if(bufferSize == buffer.Length)
+					{
+						byte[] bufferReverse = new byte[bufferSize];
+						for(int i = 0;i < bufferSize; i++)
+						{
+							bufferReverse[i] = buffer[bufferSize - 1 - i];
+						}
+						bufferSize = incomming.Send(bufferReverse);
+						if(bufferSize == bufferReverse.Length)
+						{
+							ServerSocketProcess(incomming);
+						}
+					}
 				}
 			}
-			catch { } // TODO: Error handling
+			catch(Exception ex)
+			{
+				throw new Exception("Unable to start NetNode listener thread", ex);
+			}
+
+			lock(listenerThreadLock)
+			{
+				serverListenerPool.Remove(param.thread);
+				param.thread = null;
+				if(serverListenerPool.Count == 0)
+				{
+					serverStatus = ServerStatus.Stopped;
+				}
+			}
 		}
 
-		public ServerStatus GetServerStatus()
+		private void ServerSocketProcess(Socket sock)
 		{
-			return serverStatus;
+			lock(sock)
+			{
+				while(serverStatus != ServerStatus.Stopping)
+				{
+					byte[] buffer = new byte[1];
+					int bufferSize = sock.Receive(buffer);
+					d("SERVER", "\tProcessing...");
+					if(bufferSize == buffer.Length)
+					{
+						if(buffer[0] == (byte)InitPayloadFlag.Ping)
+						{
+							sock.Send(buffer);
+						}
+						else if(buffer[0] == (byte)InitPayloadFlag.FunctionPayload)
+						{
+							buffer = new byte[4];
+							bufferSize = sock.Receive(buffer);
+							if(bufferSize == buffer.Length)
+							{
+								int payloadSize = BitConverter.ToInt32(buffer, 0);
+								buffer = new byte[payloadSize];
+								bufferSize = sock.Receive(buffer);
+								if(bufferSize == buffer.Length)
+								{
+									d("SERVER", "\tprocessing function...");
+									NodePayload payload = new NodePayload(buffer);
+									GetListener(payload.signature)(payload.data);
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 }
