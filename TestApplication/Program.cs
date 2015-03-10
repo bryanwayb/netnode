@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using NetNode;
 
 namespace TestApplication
 {
@@ -11,7 +12,11 @@ namespace TestApplication
 	{
 		static void Main(string[] args)
 		{
-			NetNode.Filters.AddFilter(new byte[] { 127, 0, 0, 1 }, 9090, new NetNode.Filter.MaxPendingQueue(100));
+			NodeIP localIP = new NodeIP(new byte[] { 127, 0, 0, 1 }, 9090);
+			Node.Default.AddNodeIP(localIP, NodeIPType.Bindable);
+			Node.Default.StartServer();
+
+			/*NetNode.Filters.AddFilter(new byte[] { 127, 0, 0, 1 }, 9090, new NetNode.Filter.MaxPendingQueue(100));
 			NetNode.Node.Default.AddNodeIP(new NetNode.NodeIP(new byte[] { 127, 0, 0, 1 }, new int[] { 9090 }), NetNode.NodeIPType.Bindable);
 			NetNode.Node.Default.AddNodeIP(new NetNode.NodeIP(new byte[] { 127, 0, 0, 1 }, new int[] { 9090 }), NetNode.NodeIPType.Connectable);
 			NetNode.Node.Default.AddListener("ThisIsATest", delegate(byte[] param)
@@ -25,13 +30,13 @@ namespace TestApplication
 			{
 				OnStart = delegate()
 				{
-					new Thread(delegate()
-					{
-						Console.WriteLine("Client thread");
-						NetNode.Node.Default.ClientExecuteFunction(new NetNode.NodePortIPLink(new byte[] { 127, 0, 0, 1 }, 9090), "ThisIsATest", null);
-					}).Start();
+					NetNode.Node.Default.ClientExecuteFunction(new NetNode.NodePortIPLink(new byte[] { 127, 0, 0, 1 }, 9090), "ThisIsATest", null);
+				},
+				OnStop = delegate()
+				{
+					Console.WriteLine("here");
 				}
-			});
+			});*/
 		}
 	}
 }

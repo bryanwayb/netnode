@@ -16,6 +16,12 @@ namespace NetNode
 		Started = 4
 	}
 
+	public struct ServerCallbacks
+	{
+		public Action OnStart;
+		public Action OnStop;
+	}
+
 	public partial class Node
 	{
 		private void d(string s, string t)
@@ -25,6 +31,9 @@ namespace NetNode
 
 		private ServerStatus serverStatus = ServerStatus.Stopped;
 		private List<Thread> serverListenerPool = new List<Thread>();
+		private int activeListenerConnections = 0;
+		private int openListenerSockets = 0;
+		private int failedListenerSockets = 0;
 
 		private struct ServerListenerParameter
 		{
@@ -65,62 +74,78 @@ namespace NetNode
 		private object listenerThreadLock = new object(); // Use this for locking the listener threads
 		private void ServerListenerThread(object obj)
 		{
-			lock(listenerThreadLock)
-			{
-				if(serverListenerPool.Count == BindableIPs.Count && serverStatus != ServerStatus.Started)
-				{
-					serverStatus = ServerStatus.Started;
-				}
-			}
-
 			ServerListenerParameter param = (ServerListenerParameter)obj;
 
 			d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " listener starting");
 
+			bool bindEstablished = false;
 			try
 			{
 				Socket socketListener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
 				socketListener.Bind(param.endpoint);
 				socketListener.Listen(Filters.ApplyFilter<int>(param.endpoint.Address.GetAddressBytes(), param.endpoint.Port, typeof(Filter.MaxPendingQueue), 10));
+
+				bindEstablished = true;
+				lock(listenerThreadLock)
+				{
+					openListenerSockets++;
+					if(openListenerSockets + failedListenerSockets == BindableIPs.Count)
+					{
+						serverStatus = ServerStatus.Started;
+
+						// TODO: Server started callback
+					}
+				}
+
 				d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " connection open to incomming connections");
 
 				while(serverStatus != ServerStatus.Stopping)
 				{
 					d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " ...waiting to connect...");
-					Socket incomming = socketListener.Accept();
-					d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " incomming connection established");
-
-					byte[] buffer = new byte[NodeMagicPayload.Length];
-					int bufferSize = incomming.Receive(buffer);
-					if(bufferSize == buffer.Length)
+					lock(obj) // Lock accepting connections on this socket until the last connection is finished processing. We don't want our incomming data to be mixed up and cause a failure, or worse.
 					{
-						byte[] bufferReverse = new byte[bufferSize];
-						for(int i = 0;i < bufferSize; i++)
+						Socket incomming = socketListener.Accept();
+						d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " incomming connection established");
+
+						byte[] buffer = new byte[NodeMagicPayload.Length]; // Expect the magic payload. This will say if the request came from a Node server. We don't check it here though, that's up to the client.
+						int bufferSize = incomming.Receive(buffer);
+						if(bufferSize == buffer.Length)
 						{
-							bufferReverse[i] = buffer[bufferSize - 1 - i];
-						}
-						bufferSize = incomming.Send(bufferReverse);
-						if(bufferSize == bufferReverse.Length)
-						{
-							ServerSocketProcess(new SocketPoolEntry(incomming));
+							byte[] bufferReverse = new byte[bufferSize]; // Reverse here to verify on the client end
+							for(int i = 0;i < bufferSize;i++)
+							{
+								bufferReverse[i] = buffer[bufferSize - 1 - i];
+							}
+							bufferSize = incomming.Send(bufferReverse);
+							if(bufferSize == bufferReverse.Length)
+							{
+								ServerSocketProcess(new SocketPoolEntry(incomming)); // Start active connection with client
+							}
 						}
 					}
 				}
+
+				openListenerSockets--;
 			}
 			catch(Exception ex)
 			{
+				if(bindEstablished)
+				{
+					openListenerSockets--;
+				}
+				failedListenerSockets++;
 				throw new Exception("Unable to start NetNode listener thread", ex);
 			}
 
 			lock(listenerThreadLock)
 			{
-				serverListenerPool.Remove(param.thread);
-				param.thread = null;
-				if(serverListenerPool.Count == 0)
+				if(openListenerSockets <= 0) // <=, just in case
 				{
-					serverStatus = ServerStatus.Stopped;
+					serverStatus = ServerStatus.Stopped; // CONTINUE WORKING HERE
 				}
+
+				serverListenerPool.Remove(param.thread);
 			}
 		}
 

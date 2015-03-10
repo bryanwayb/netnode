@@ -122,7 +122,7 @@ namespace NetNode
 				{
 					clientStatus = ClientStatus.Started;
 					if(clientCallbacks.HasValue && clientCallbacks.Value.OnStart != null)
-					{
+					{ 
 						clientCallbacks.Value.OnStart();
 					}
 				}
@@ -135,41 +135,54 @@ namespace NetNode
 			clientSocketPool.Add(iplink, sockEntry);
 			new Thread(delegate() // Send ping to server to keep connection open
 			{
-				while(clientStatus == ClientStatus.Started)
+				bool disconnected = false;
+				while(clientStatus != ClientStatus.Stopping && !disconnected)
 				{
-					d("CLIENT", "sending ping");
-					try
+					lock(sockEntry.sLock)
 					{
-						byte[] buffer = new byte[] { (byte)InitPayloadFlag.Ping };
-						if(sockEntry.socket.Send(buffer) != 1 || sockEntry.socket.Receive(buffer) != 1)
+						d("CLIENT", "sending ping");
+						try
 						{
-							break;
+							byte[] buffer = new byte[] { (byte)InitPayloadFlag.Ping };
+							if(sockEntry.socket.Send(buffer) != 1 || sockEntry.socket.Receive(buffer) != 1)
+							{
+								disconnected = true;
+							}
 						}
-					}
-					catch // Connection has been broken
-					{
-						break;
+						catch // Connection has been broken
+						{
+							disconnected = true;
+						}
 					}
 					Thread.Sleep(Filters.ApplyFilter<int>(iplink, typeof(Filter.KeepAlivePing), 3000));
 				}
 
-				if(clientStatus == ClientStatus.Started) // Broke out of loop because for reason other than stopping the client.
+				lock(runnerThreadLock)
 				{
-					lock(sockEntry.sLock)
+					if(sockEntry.socket.Connected && !disconnected) // Socket is still connected
 					{
-						if(sockEntry.socket.Connected) // Socket still thinks it's connected.
-						{
-							sockEntry.socket.Shutdown(SocketShutdown.Both);
-							sockEntry.socket.Close();
-						}
+						sockEntry.socket.Shutdown(SocketShutdown.Both);
+						sockEntry.socket.Close();
+					}
 
-						if(clientSocketPool.ContainsKey(iplink))
+					if(clientSocketPool.ContainsKey(iplink))
+					{
+						clientSocketPool.Remove(iplink);
+					}
+
+					if(clientStatus == ClientStatus.Stopping)
+					{
+						if(clientRunnerPool.Count == 0)
 						{
-							clientSocketPool.Remove(iplink);
+							clientStatus = ClientStatus.Stopped;
+							if(clientCallbacks.HasValue && clientCallbacks.Value.OnStop != null)
+							{
+								clientCallbacks.Value.OnStop();
+							}
 						}
 					}
-					sockEntry.socket = null;
 				}
+				sockEntry.socket = null;
 			}).Start();
 		}
 
