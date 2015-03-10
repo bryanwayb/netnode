@@ -103,7 +103,7 @@ namespace NetNode
 						bufferSize = incomming.Send(bufferReverse);
 						if(bufferSize == bufferReverse.Length)
 						{
-							ServerSocketProcess(incomming);
+							ServerSocketProcess(new SocketPoolEntry(incomming));
 						}
 					}
 				}
@@ -124,35 +124,60 @@ namespace NetNode
 			}
 		}
 
-		private void ServerSocketProcess(Socket sock)
+		private void ServerSocketProcess(SocketPoolEntry entry)
 		{
-			lock(sock)
+			lock(entry.sLock)
 			{
 				while(serverStatus != ServerStatus.Stopping)
 				{
 					byte[] buffer = new byte[1];
-					int bufferSize = sock.Receive(buffer);
+					int bufferSize = entry.socket.Receive(buffer);
 					d("SERVER", "\tProcessing...");
 					if(bufferSize == buffer.Length)
 					{
 						if(buffer[0] == (byte)InitPayloadFlag.Ping)
 						{
-							sock.Send(buffer);
+							entry.socket.Send(buffer);
 						}
 						else if(buffer[0] == (byte)InitPayloadFlag.FunctionPayload)
 						{
 							buffer = new byte[4];
-							bufferSize = sock.Receive(buffer);
+							bufferSize = entry.socket.Receive(buffer);
 							if(bufferSize == buffer.Length)
 							{
 								int payloadSize = BitConverter.ToInt32(buffer, 0);
 								buffer = new byte[payloadSize];
-								bufferSize = sock.Receive(buffer);
+								bufferSize = entry.socket.Receive(buffer);
 								if(bufferSize == buffer.Length)
 								{
 									d("SERVER", "\tprocessing function...");
-									NodePayload payload = new NodePayload(buffer);
-									GetListener(payload.signature)(payload.data);
+									try
+									{
+										NodePayload payload = new NodePayload(buffer);
+										NodeFunc func = GetListener(payload.signature);
+										if(func != null)
+										{
+											// Send back response data
+											buffer = func(payload.data);
+											if(buffer == null) // No data to send back
+											{
+												entry.socket.Send(BitConverter.GetBytes((int)0));
+											}
+											else
+											{
+												byte[] sizeHeader = BitConverter.GetBytes(buffer.Length);
+												bufferSize = entry.socket.Send(sizeHeader);
+												if(buffer.Length > 0 && bufferSize == sizeHeader.Length)
+												{
+													entry.socket.Send(buffer);
+												}
+											}
+										}
+									}
+									catch(Exception)
+									{
+										continue; // There was an error during processing. Don't kill the server, just accept it and move on.
+									}
 								}
 							}
 						}

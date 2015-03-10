@@ -20,14 +20,18 @@ namespace TestApplication
 				return null;
 			});
 			NetNode.Node.Default.StartServer();
-			NetNode.Node.Default.StartClient();
 
-			new Thread(delegate()
+			NetNode.Node.Default.StartClient(new NetNode.ClientCallbacks()
+			{
+				OnStart = delegate()
 				{
-					Thread.Sleep(2000); // Todo: Create a connection callback so that things like this aren't needed
-					Console.WriteLine("Client thread");
-					NetNode.Node.Default.ClientExecuteFunction(new NetNode.NodePortIPLink(new byte[] { 127, 0, 0, 1 }, 9090), "ThisIsATest", null);
-				}).Start();
+					new Thread(delegate()
+					{
+						Console.WriteLine("Client thread");
+						NetNode.Node.Default.ClientExecuteFunction(new NetNode.NodePortIPLink(new byte[] { 127, 0, 0, 1 }, 9090), "ThisIsATest", null);
+					}).Start();
+				}
+			});
 		}
 	}
 }

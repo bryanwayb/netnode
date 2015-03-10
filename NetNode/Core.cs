@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net.Sockets;
 using System.Text;
 
 namespace NetNode
@@ -86,6 +87,18 @@ namespace NetNode
 	{
 		Ping = 0x0,				// Ping connectivity, does essentially nothing aside from an echo of 0x0.
 		FunctionPayload = 0x1,	// Performs function on the server
+	}
+
+	public struct SocketPoolEntry
+	{
+		public SocketPoolEntry(Socket socket)
+		{
+			this.socket = socket;
+			sLock = new object();
+		}
+
+		public Socket socket;
+		public object sLock;
 	}
 
 	public partial class Node
