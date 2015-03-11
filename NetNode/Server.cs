@@ -108,12 +108,12 @@ namespace NetNode
 
 			bool bindEstablished = false;
 			SocketPoolEntry? entry = null;
+			byte[] endpointAddress = param.endpoint.Address.GetAddressBytes();
 			try
 			{
 				Socket socketListener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
 				socketListener.Bind(param.endpoint);
-				byte[] endpointAddress = param.endpoint.Address.GetAddressBytes();
 				socketListener.Listen(Filters.ApplyFilter<int>(endpointAddress, param.endpoint.Port, typeof(Filter.MaxPendingQueue), 10));
 
 				entry = new SocketPoolEntry(socketListener);
@@ -180,12 +180,10 @@ namespace NetNode
 				failedListenerSockets++;
 
 				// TODO: Also check if failure of this bind should stop the server
-				if(failedListenerSockets == serverListenerPool.Count)
+				if(failedListenerSockets == serverListenerPool.Count || Filters.ApplyFilter<bool>(endpointAddress, param.endpoint.Port, typeof(Filter.Essential), false))
 				{
 					this.StopServer();
 				}
-
-				throw new Exception("Unable to start NetNode listener thread", ex);
 			}
 
 			lock(listenerThreadLock)
@@ -288,22 +286,13 @@ namespace NetNode
 		{
 			lock(this)
 			{
-				if(serverStatus != ServerStatus.Started)
-				{
-					throw new InvalidOperationException("NetNode server can only be stopped from a started state");
-				}
-				else
-				{
-					serverStatus = ServerStatus.Stopping;
+				serverStatus = ServerStatus.Stopping;
 
-					foreach(SocketPoolEntry entry in serverSocketPool)
-					{
-						lock(entry.sLock)
-						{
-							entry.socket.Close();
-						}
-					}
+				foreach(SocketPoolEntry entry in serverSocketPool)
+				{
+					entry.socket.Close();
 				}
+				serverSocketPool.Clear();
 			}
 		}
 	}

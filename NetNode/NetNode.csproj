@@ -46,6 +46,7 @@
     <Compile Include="Filters.cs" />
     <Compile Include="Filter\Base.cs" />
     <Compile Include="Filter\ClientFilter.cs" />
+    <Compile Include="Filter\General.cs" />
     <Compile Include="Filter\ServerFilter.cs" />
     <Compile Include="Listeners.cs" />
     <Compile Include="NodeIP.cs" />

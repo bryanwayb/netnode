@@ -12,8 +12,11 @@ namespace TestApplication
 	{
 		static void Main(string[] args)
 		{
-			NodeIP localIP = new NodeIP(new byte[] { 127, 0, 0, 1 }, 9090);
+			NodeIP localIP = new NodeIP(new byte[] { 128, 0, 0, 1 }, 9090);
 			Node.Default.AddNodeIP(localIP, NodeIPType.Bindable);
+
+			Filters.AddFilter(new NodePortIPLink(localIP.ip, 9090), new NetNode.Filter.Essential(true));
+
 			Node.Default.SetServerCallbacks(new ServerCallbacks()
 				{
 					OnStart = delegate()
