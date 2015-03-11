@@ -20,6 +20,7 @@ namespace NetNode
 	{
 		public Action OnStart;
 		public Action OnStop;
+		public Action OnError;
 	}
 
 	public partial class Node
@@ -179,7 +180,11 @@ namespace NetNode
 				}
 				failedListenerSockets++;
 
-				// TODO: Also check if failure of this bind should stop the server
+				if(serverCallbacks.HasValue && serverCallbacks.Value.OnError != null)
+				{
+					serverCallbacks.Value.OnError();
+				}
+
 				if(failedListenerSockets == serverListenerPool.Count || Filters.ApplyFilter<bool>(endpointAddress, param.endpoint.Port, typeof(Filter.Essential), false))
 				{
 					this.StopServer();

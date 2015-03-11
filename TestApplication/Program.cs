@@ -12,9 +12,10 @@ namespace TestApplication
 	{
 		static void Main(string[] args)
 		{
-			NodeIP localIP = new NodeIP(new byte[] { 128, 0, 0, 1 }, 9090);
-			Node.Default.AddNodeIP(localIP, NodeIPType.Bindable);
+			NodeIP localIP = new NodeIP(new byte[] { 127, 0, 0, 1 }, 9090);
 
+			// Setup server
+			Node.Default.AddNodeIP(localIP, NodeIPType.Bindable);
 			Filters.AddFilter(new NodePortIPLink(localIP.ip, 9090), new NetNode.Filter.Essential(true));
 
 			Node.Default.SetServerCallbacks(new ServerCallbacks()
@@ -24,6 +25,10 @@ namespace TestApplication
 						Console.WriteLine("Server started");
 						Console.WriteLine(Node.Default.GetOpenSocketCount());
 						Node.Default.StopServer();
+					},
+					OnError = delegate()
+					{
+						Console.WriteLine("Error");
 					},
 					OnStop = delegate()
 					{
