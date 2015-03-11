@@ -29,12 +29,6 @@ namespace NetNode
 			Console.WriteLine("[{0}]: {1}", s, t);
 		}
 
-		private ServerStatus serverStatus = ServerStatus.Stopped;
-		private List<Thread> serverListenerPool = new List<Thread>();
-		private int activeListenerConnections = 0;
-		private int openListenerSockets = 0;
-		private int failedListenerSockets = 0;
-
 		private struct ServerListenerParameter
 		{
 			public ServerListenerParameter(Node instance, IPEndPoint endpoint, Thread thread)
@@ -47,6 +41,40 @@ namespace NetNode
 			public Node instance;
 			public IPEndPoint endpoint;
 			public Thread thread;
+		}
+
+		private ServerStatus serverStatus = ServerStatus.Stopped;
+		private List<Thread> serverListenerPool = new List<Thread>();
+		private HashSet<SocketPoolEntry> serverSocketPool = new HashSet<SocketPoolEntry>();
+		private ServerCallbacks? serverCallbacks = null;
+
+		private int activeListenerConnections = 0;
+		private int openListenerSockets = 0;
+		private int failedListenerSockets = 0;
+
+		public void SetServerCallbacks(ServerCallbacks serverCallbacks)
+		{
+			this.serverCallbacks = serverCallbacks;
+		}
+
+		public ServerStatus GetServerStatus()
+		{
+			return serverStatus;
+		}
+
+		public int GetActiveConnectionCount()
+		{
+			return activeListenerConnections;
+		}
+
+		public int GetOpenSocketCount()
+		{
+			return openListenerSockets;
+		}
+
+		public int GetFailedSocketCount()
+		{
+			return failedListenerSockets;
 		}
 
 		public void StartServer()
@@ -79,12 +107,17 @@ namespace NetNode
 			d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " listener starting");
 
 			bool bindEstablished = false;
+			SocketPoolEntry? entry = null;
 			try
 			{
 				Socket socketListener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
 				socketListener.Bind(param.endpoint);
-				socketListener.Listen(Filters.ApplyFilter<int>(param.endpoint.Address.GetAddressBytes(), param.endpoint.Port, typeof(Filter.MaxPendingQueue), 10));
+				byte[] endpointAddress = param.endpoint.Address.GetAddressBytes();
+				socketListener.Listen(Filters.ApplyFilter<int>(endpointAddress, param.endpoint.Port, typeof(Filter.MaxPendingQueue), 10));
+
+				entry = new SocketPoolEntry(socketListener);
+				serverSocketPool.Add(entry.Value);
 
 				bindEstablished = true;
 				lock(listenerThreadLock)
@@ -94,7 +127,10 @@ namespace NetNode
 					{
 						serverStatus = ServerStatus.Started;
 
-						// TODO: Server started callback
+						if(serverCallbacks.HasValue)
+						{
+							serverCallbacks.Value.OnStart();
+						}
 					}
 				}
 
@@ -103,25 +139,32 @@ namespace NetNode
 				while(serverStatus != ServerStatus.Stopping)
 				{
 					d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " ...waiting to connect...");
-					lock(obj) // Lock accepting connections on this socket until the last connection is finished processing. We don't want our incomming data to be mixed up and cause a failure, or worse.
+					lock(entry.Value.sLock) // Lock accepting connections on this socket until the last connection is finished processing. We don't want our incomming data to be mixed up and cause a failure, or worse.
 					{
-						Socket incomming = socketListener.Accept();
-						d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " incomming connection established");
-
-						byte[] buffer = new byte[NodeMagicPayload.Length]; // Expect the magic payload. This will say if the request came from a Node server. We don't check it here though, that's up to the client.
-						int bufferSize = incomming.Receive(buffer);
-						if(bufferSize == buffer.Length)
+						try
 						{
-							byte[] bufferReverse = new byte[bufferSize]; // Reverse here to verify on the client end
-							for(int i = 0;i < bufferSize;i++)
+							Socket incomming = socketListener.Accept();
+							d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " incomming connection established");
+
+							byte[] buffer = new byte[NodeMagicPayload.Length]; // Expect the magic payload. This will say if the request came from a Node server. We don't check it here though, that's up to the client.
+							int bufferSize = incomming.Receive(buffer);
+							if(bufferSize == buffer.Length)
 							{
-								bufferReverse[i] = buffer[bufferSize - 1 - i];
+								byte[] bufferReverse = new byte[bufferSize]; // Reverse here to verify on the client end
+								for(int i = 0;i < bufferSize;i++)
+								{
+									bufferReverse[i] = buffer[bufferSize - 1 - i];
+								}
+								bufferSize = incomming.Send(bufferReverse);
+								if(bufferSize == bufferReverse.Length)
+								{
+									ServerSocketProcess(new SocketPoolEntry(incomming)); // Start active connection with client
+								}
 							}
-							bufferSize = incomming.Send(bufferReverse);
-							if(bufferSize == bufferReverse.Length)
-							{
-								ServerSocketProcess(new SocketPoolEntry(incomming)); // Start active connection with client
-							}
+						}
+						catch(SocketException) // Something happened with the connection. Retry?
+						{
+							continue;
 						}
 					}
 				}
@@ -135,76 +178,129 @@ namespace NetNode
 					openListenerSockets--;
 				}
 				failedListenerSockets++;
+
+				// TODO: Also check if failure of this bind should stop the server
+				if(failedListenerSockets == serverListenerPool.Count)
+				{
+					this.StopServer();
+				}
+
 				throw new Exception("Unable to start NetNode listener thread", ex);
 			}
 
 			lock(listenerThreadLock)
 			{
-				if(openListenerSockets <= 0) // <=, just in case
+				if(openListenerSockets == 0)
 				{
-					serverStatus = ServerStatus.Stopped; // CONTINUE WORKING HERE
+					serverStatus = ServerStatus.Stopped;
+
+					if(serverCallbacks.HasValue)
+					{
+						serverCallbacks.Value.OnStop();
+					}
 				}
 
+				if(entry.HasValue)
+				{
+					serverSocketPool.Remove(entry.Value);
+				}
+				
 				serverListenerPool.Remove(param.thread);
 			}
 		}
 
 		private void ServerSocketProcess(SocketPoolEntry entry)
 		{
-			lock(entry.sLock)
+			// Spawn a new thread for established connections.
+			new Thread(delegate()
 			{
-				while(serverStatus != ServerStatus.Stopping)
+				activeListenerConnections++;
+				lock(entry.sLock) // There actually isn't a reason to do this right now. TODO: Remove this lock if still unneeded in future.
 				{
-					byte[] buffer = new byte[1];
-					int bufferSize = entry.socket.Receive(buffer);
-					d("SERVER", "\tProcessing...");
-					if(bufferSize == buffer.Length)
+					while(serverStatus != ServerStatus.Stopping)
 					{
-						if(buffer[0] == (byte)InitPayloadFlag.Ping)
+						try
 						{
-							entry.socket.Send(buffer);
-						}
-						else if(buffer[0] == (byte)InitPayloadFlag.FunctionPayload)
-						{
-							buffer = new byte[4];
-							bufferSize = entry.socket.Receive(buffer);
+							byte[] buffer = new byte[1];
+							int bufferSize = entry.socket.Receive(buffer);
+							d("SERVER", "\tProcessing...");
 							if(bufferSize == buffer.Length)
 							{
-								int payloadSize = BitConverter.ToInt32(buffer, 0);
-								buffer = new byte[payloadSize];
-								bufferSize = entry.socket.Receive(buffer);
-								if(bufferSize == buffer.Length)
+								if(buffer[0] == (byte)InitPayloadFlag.Ping)
 								{
-									d("SERVER", "\tprocessing function...");
-									try
+									entry.socket.Send(buffer);
+								}
+								else if(buffer[0] == (byte)InitPayloadFlag.FunctionPayload)
+								{
+									buffer = new byte[4];
+									bufferSize = entry.socket.Receive(buffer);
+									if(bufferSize == buffer.Length)
 									{
-										NodePayload payload = new NodePayload(buffer);
-										NodeFunc func = GetListener(payload.signature);
-										if(func != null)
+										int payloadSize = BitConverter.ToInt32(buffer, 0);
+										buffer = new byte[payloadSize];
+										bufferSize = entry.socket.Receive(buffer);
+										if(bufferSize == buffer.Length)
 										{
-											// Send back response data
-											buffer = func(payload.data);
-											if(buffer == null) // No data to send back
+											d("SERVER", "\tprocessing function...");
+											try
 											{
-												entry.socket.Send(BitConverter.GetBytes((int)0));
-											}
-											else
-											{
-												byte[] sizeHeader = BitConverter.GetBytes(buffer.Length);
-												bufferSize = entry.socket.Send(sizeHeader);
-												if(buffer.Length > 0 && bufferSize == sizeHeader.Length)
+												NodePayload payload = new NodePayload(buffer);
+												NodeFunc func = GetListener(payload.signature);
+												if(func != null)
 												{
-													entry.socket.Send(buffer);
+													// Send back response data
+													buffer = func(payload.data);
+													if(buffer == null) // No data to send back
+													{
+														entry.socket.Send(BitConverter.GetBytes((int)0));
+													}
+													else
+													{
+														byte[] sizeHeader = BitConverter.GetBytes(buffer.Length);
+														bufferSize = entry.socket.Send(sizeHeader);
+														if(buffer.Length > 0 && bufferSize == sizeHeader.Length)
+														{
+															entry.socket.Send(buffer);
+														}
+													}
 												}
+											}
+											catch(Exception)
+											{
+												continue; // There was an error during processing. Don't kill the server, just accept it and move on.
 											}
 										}
 									}
-									catch(Exception)
-									{
-										continue; // There was an error during processing. Don't kill the server, just accept it and move on.
-									}
 								}
 							}
+						}
+						catch(SocketException)
+						{
+							continue;
+						}
+					}
+				}
+				activeListenerConnections--;
+			}).Start();
+		}
+
+		public void StopServer()
+		{
+			lock(this)
+			{
+				if(serverStatus != ServerStatus.Started)
+				{
+					throw new InvalidOperationException("NetNode server can only be stopped from a started state");
+				}
+				else
+				{
+					serverStatus = ServerStatus.Stopping;
+
+					foreach(SocketPoolEntry entry in serverSocketPool)
+					{
+						lock(entry.sLock)
+						{
+							entry.socket.Close();
 						}
 					}
 				}

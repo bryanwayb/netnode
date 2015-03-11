@@ -14,6 +14,20 @@ namespace TestApplication
 		{
 			NodeIP localIP = new NodeIP(new byte[] { 127, 0, 0, 1 }, 9090);
 			Node.Default.AddNodeIP(localIP, NodeIPType.Bindable);
+			Node.Default.SetServerCallbacks(new ServerCallbacks()
+				{
+					OnStart = delegate()
+					{
+						Console.WriteLine("Server started");
+						Console.WriteLine(Node.Default.GetOpenSocketCount());
+						Node.Default.StopServer();
+					},
+					OnStop = delegate()
+					{
+						Console.WriteLine("Server closed");
+						Console.WriteLine(Node.Default.GetOpenSocketCount());
+					}
+				});
 			Node.Default.StartServer();
 
 			/*NetNode.Filters.AddFilter(new byte[] { 127, 0, 0, 1 }, 9090, new NetNode.Filter.MaxPendingQueue(100));
