@@ -19,39 +19,53 @@ namespace NetNode
 	public struct ClientCallbacks
 	{
 		public Action OnStart;
-		public Action OnStop; // TODO: Currently has no way of stopping the client, so this is never called (duh), so remember to program this callback logic
+		public Action OnStop;
 	}
 
 	public partial class Node
 	{
-		private ClientStatus clientStatus = ClientStatus.Stopped;
-		private List<Thread> clientRunnerPool = new List<Thread>();
-		private Dictionary<NodePortIPLink, SocketPoolEntry> clientSocketPool = new Dictionary<NodePortIPLink, SocketPoolEntry>(new NodePortIPLinkArrayComparer());
-		private ClientCallbacks? clientCallbacks = null;
-
 		private struct ClientRunnerParameter
 		{
-			public ClientRunnerParameter(Node instance, IPEndPoint endpoint, Thread thread)
+			public ClientRunnerParameter(Node instance, IPEndPoint endpoint)
 			{
 				this.instance = instance;
 				this.endpoint = endpoint;
-				this.thread = thread;
 			}
 
 			public Node instance;
 			public IPEndPoint endpoint;
-			public Thread thread;
+		}
+
+		private ClientStatus clientStatus = ClientStatus.Stopped;
+		private Dictionary<NodePortIPLink, SocketPoolEntry> clientSocketPool = new Dictionary<NodePortIPLink, SocketPoolEntry>(new NodePortIPLinkArrayComparer());
+		private ClientCallbacks? clientCallbacks = null;
+
+		private int potentialOpenClientSockets = 0;
+		private int openClientSockets = 0;
+		private int failedClientSockets = 0;
+
+		public void SetClientCallbacks(ClientCallbacks clientCallbacks)
+		{
+			this.clientCallbacks = clientCallbacks;
+		}
+
+		public ClientStatus GetClientStatus()
+		{
+			return clientStatus;
+		}
+
+		public int GetOpenClientSocketCount()
+		{
+			return openClientSockets;
+		}
+
+		public int GetFailedClientSocketCount()
+		{
+			return failedClientSockets;
 		}
 
 		public void StartClient()
 		{
-			StartClient(null);
-		}
-
-		public void StartClient(ClientCallbacks? callbacks)
-		{
-			clientCallbacks = callbacks;
-
 			lock(this)
 			{
 				d("CLIENT", "Client starting");
@@ -59,134 +73,193 @@ namespace NetNode
 				{
 					throw new InvalidOperationException("NetNode client can only be started from a stopped state");
 				}
-				else if(ConnectableIPs != null && ConnectableIPs.Count > 0)
+				else if(ConnectableIPs != null && (potentialOpenClientSockets = ConnectableIPs.Count) > 0)
 				{
 					clientStatus = ClientStatus.Starting;
 					foreach(IPEndPoint endpoint in BindableIPs)
 					{
-						Thread runner = new Thread(ClientRunnerThread);
-						clientRunnerPool.Add(runner);
-						runner.Start(new ClientRunnerParameter(this, endpoint, runner));
+						new Thread(ClientRunnerThread).Start(new ClientRunnerParameter(this, endpoint));
 					}
 				}
 			}
 		}
 
-		private object runnerThreadLock = new object(); // Use this for locking the listener threads
 		private void ClientRunnerThread(object obj)
 		{
 			ClientRunnerParameter param = (ClientRunnerParameter)obj;
 
 			d("CLIENT", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " client starting");
 
+			SocketPoolEntry? entry = null;
+			NodePortIPLink? ipLink = null;
 			try
 			{
-				d("CLIENT", "\t" + param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " sending init");
 				Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 				sock.Connect(param.endpoint);
 
-				int bufferSize = sock.Send(NodeMagicPayload);
-				if(bufferSize == NodeMagicPayload.Length)
+				ipLink = new NodePortIPLink(param.endpoint.Address.GetAddressBytes(), param.endpoint.Port);
+				entry = new SocketPoolEntry(sock);
+				clientSocketPool.Add(ipLink.Value, entry.Value);
+				openClientSockets++;
+				try
 				{
-					byte[] buffer = new byte[bufferSize];
-					bufferSize = sock.Receive(buffer);
-					if(bufferSize == buffer.Length)
+					ClientConnectToNode(ipLink.Value, entry.Value);
+				}
+				catch(SocketException)
+				{
+					openClientSockets--;
+					throw new Exception();
+				}
+			}
+			catch(Exception)
+			{
+				failedClientSockets++;
+
+				if(entry.HasValue)
+				{
+					entry.Value.socket.Close();
+
+					if(ipLink.HasValue)
 					{
-						bool valid = true;
-						for(int i = 0; i < bufferSize; i++)
+						clientSocketPool.Remove(ipLink.Value);
+					}
+				}
+
+				ClientCheckIfStopNeeded();
+			}
+		}
+
+		private object clientSocketProcessLock = new object();
+		private void ClientSocketProcess(NodePortIPLink ipLink, SocketPoolEntry entry)
+		{
+			new Thread(delegate()
+			{
+				lock(clientSocketProcessLock)
+				{
+					if(failedClientSockets + openClientSockets == potentialOpenClientSockets)
+					{
+						clientStatus = ClientStatus.Started;
+
+						if(clientCallbacks.HasValue)
 						{
-							if(buffer[i] != NodeMagicPayload[bufferSize - 1 - i])
+							clientCallbacks.Value.OnStart();
+						}
+					}
+				}
+
+				int pingDelay = Filters.ApplyFilter<int>(ipLink, typeof(Filter.KeepAlivePing), 3000);
+
+				// This acts as the heartbeat to the server. Consistantly ping the server to keep the connection alive.
+				while(clientStatus != ClientStatus.Stopping)
+				{
+					try
+					{
+						lock(entry.sLock)
+						{
+							bool connected = false;
+							if(connected = (entry.socket.Poll(-1, SelectMode.SelectWrite) && entry.socket.Connected)) // TODO: Make timeout configurable (in microseconds)
 							{
-								valid = false;
+								byte[] buffer = new byte[] { (byte)InitPayloadFlag.Ping };
+								if(entry.socket.Send(buffer) != 1 || entry.socket.Receive(buffer) != 1)
+								{
+									connected = false;
+								}
+							}
+
+							if(!connected) // Attempt a reconnect
+							{
+								entry.isVerified = false;
+								ClientConnectToNode(ipLink, entry);
 								break;
 							}
 						}
-
-						if(valid)
-						{
-							d("CLIENT", "\t" + param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " node server verified");
-
-							ClientSocketProcess(new NodePortIPLink(param.endpoint.Address.GetAddressBytes(), param.endpoint.Port), sock);
-						}
 					}
-				}
-			}
-			catch(Exception ex)
-			{
-				throw new Exception("Unable to start NetNode runner thread", ex);
-			}
+					catch(SocketException)
+					{
+						break; // There's not really anything we should do to try and repair the connection at this point. Let's just let it close.
+					}
 
-			lock(runnerThreadLock)
-			{
-				if(clientRunnerPool.Count == ConnectableIPs.Count && clientStatus != ClientStatus.Started)
+					Thread.Sleep(pingDelay);
+				}
+
+				if(entry.socket.Connected)
 				{
-					clientStatus = ClientStatus.Started;
-					if(clientCallbacks.HasValue && clientCallbacks.Value.OnStart != null)
-					{ 
-						clientCallbacks.Value.OnStart();
-					}
-				}
-			}
-		}
-
-		private void ClientSocketProcess(NodePortIPLink iplink, Socket sock)
-		{
-			SocketPoolEntry sockEntry = new SocketPoolEntry(sock);
-			clientSocketPool.Add(iplink, sockEntry);
-			new Thread(delegate() // Send ping to server to keep connection open
-			{
-				bool disconnected = false;
-				while(clientStatus != ClientStatus.Stopping && !disconnected)
-				{
-					lock(sockEntry.sLock)
-					{
-						d("CLIENT", "sending ping");
-						try
-						{
-							byte[] buffer = new byte[] { (byte)InitPayloadFlag.Ping };
-							if(sockEntry.socket.Send(buffer) != 1 || sockEntry.socket.Receive(buffer) != 1)
-							{
-								disconnected = true;
-							}
-						}
-						catch // Connection has been broken
-						{
-							disconnected = true;
-						}
-					}
-					Thread.Sleep(Filters.ApplyFilter<int>(iplink, typeof(Filter.KeepAlivePing), 3000));
+					entry.socket.Close();
 				}
 
-				lock(runnerThreadLock)
-				{
-					if(sockEntry.socket.Connected && !disconnected) // Socket is still connected
-					{
-						sockEntry.socket.Shutdown(SocketShutdown.Both);
-						sockEntry.socket.Close();
-					}
-
-					if(clientSocketPool.ContainsKey(iplink))
-					{
-						clientSocketPool.Remove(iplink);
-					}
-
-					if(clientStatus == ClientStatus.Stopping)
-					{
-						if(clientRunnerPool.Count == 0)
-						{
-							clientStatus = ClientStatus.Stopped;
-							if(clientCallbacks.HasValue && clientCallbacks.Value.OnStop != null)
-							{
-								clientCallbacks.Value.OnStop();
-							}
-						}
-					}
-				}
-				sockEntry.socket = null;
+				// The socket is due to be cleaned up at this point.
+				openClientSockets--;
+				ClientCheckIfStopNeeded();
 			}).Start();
 		}
 
-		public byte[] ClientExecuteFunction(NodePortIPLink iplink, string signature, byte[] data)
+		private void ClientConnectToNode(NodePortIPLink ipLink, SocketPoolEntry entry)
+		{
+			d("CLIENT", "\t" + "sending init");
+			int bufferSize = entry.socket.Send(NodeMagicPayload);
+			if(bufferSize == NodeMagicPayload.Length)
+			{
+				byte[] buffer = new byte[bufferSize];
+				bufferSize = entry.socket.Receive(buffer);
+				if(bufferSize == buffer.Length)
+				{
+					bool valid = true;
+					for(int i = 0;i < bufferSize;i++)
+					{
+						if(buffer[i] != NodeMagicPayload[bufferSize - 1 - i])
+						{
+							valid = false;
+							break;
+						}
+					}
+
+					if(valid)
+					{
+						d("CLIENT", "\t" + "node server verified");
+
+						entry.isVerified = true;
+						ClientSocketProcess(ipLink, entry);
+					}
+				}
+			}
+		}
+
+		private void ClientCheckIfStopNeeded()
+		{
+			lock(clientSocketProcessLock)
+			{
+				if(failedClientSockets == potentialOpenClientSockets)
+				{
+					this.StopClient();
+				}
+
+				if(openClientSockets == 0)
+				{
+					clientStatus = ClientStatus.Stopped;
+
+					if(clientCallbacks.HasValue)
+					{
+						clientCallbacks.Value.OnStop();
+					}
+				}
+			}
+		}
+
+		public void StopClient()
+		{
+			lock(this)
+			{
+				clientStatus = ClientStatus.Stopping;
+
+				foreach(KeyValuePair<NodePortIPLink, SocketPoolEntry> entry in clientSocketPool)
+				{
+					entry.Value.socket.Close();
+				}
+				clientSocketPool.Clear();
+			}
+		}
+
+		/*public byte[] ClientExecuteFunction(NodePortIPLink iplink, string signature, byte[] data)
 		{
 			if(clientSocketPool.ContainsKey(iplink))
 			{
@@ -233,6 +306,6 @@ namespace NetNode
 			}
 
 			return null;
-		}
+		}*/
 	}
 }

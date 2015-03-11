@@ -89,16 +89,18 @@ namespace NetNode
 		FunctionPayload = 0x1,	// Performs function on the server
 	}
 
-	public struct SocketPoolEntry
+	struct SocketPoolEntry
 	{
 		public SocketPoolEntry(Socket socket)
 		{
 			this.socket = socket;
 			sLock = new object();
+			isVerified = false;
 		}
 
 		public Socket socket;
 		public object sLock;
+		public bool isVerified; // Use by the client portion of NetNode
 	}
 
 	public partial class Node

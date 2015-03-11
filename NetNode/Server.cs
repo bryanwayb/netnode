@@ -32,24 +32,22 @@ namespace NetNode
 
 		private struct ServerListenerParameter
 		{
-			public ServerListenerParameter(Node instance, IPEndPoint endpoint, Thread thread)
+			public ServerListenerParameter(Node instance, IPEndPoint endpoint)
 			{
 				this.instance = instance;
 				this.endpoint = endpoint;
-				this.thread = thread;
 			}
 
 			public Node instance;
 			public IPEndPoint endpoint;
-			public Thread thread;
 		}
 
 		private ServerStatus serverStatus = ServerStatus.Stopped;
-		private List<Thread> serverListenerPool = new List<Thread>();
 		private HashSet<SocketPoolEntry> serverSocketPool = new HashSet<SocketPoolEntry>();
 		private ServerCallbacks? serverCallbacks = null;
 
 		private int activeListenerConnections = 0;
+		private int potentialOpenListenerSockets = 0;
 		private int openListenerSockets = 0;
 		private int failedListenerSockets = 0;
 
@@ -63,17 +61,17 @@ namespace NetNode
 			return serverStatus;
 		}
 
-		public int GetActiveConnectionCount()
+		public int GetActiveServerConnectionCount()
 		{
 			return activeListenerConnections;
 		}
 
-		public int GetOpenSocketCount()
+		public int GetOpenServerSocketCount()
 		{
 			return openListenerSockets;
 		}
 
-		public int GetFailedSocketCount()
+		public int GetFailedServerSocketCount()
 		{
 			return failedListenerSockets;
 		}
@@ -87,14 +85,12 @@ namespace NetNode
 				{
 					throw new InvalidOperationException("NetNode server can only be started from a stopped state");
 				}
-				else if(BindableIPs != null && BindableIPs.Count > 0)
+				else if(BindableIPs != null && (potentialOpenListenerSockets = BindableIPs.Count) > 0)
 				{
 					serverStatus = ServerStatus.Starting;
 					foreach(IPEndPoint endpoint in BindableIPs)
 					{
-						Thread listener = new Thread(ServerListenerThread);
-						serverListenerPool.Add(listener);
-						listener.Start(new ServerListenerParameter(this, endpoint, listener));
+						new Thread(ServerListenerThread).Start(new ServerListenerParameter(this, endpoint));
 					}
 				}
 			}
@@ -172,7 +168,7 @@ namespace NetNode
 
 				openListenerSockets--;
 			}
-			catch(Exception ex)
+			catch(Exception)
 			{
 				if(bindEstablished)
 				{
@@ -185,7 +181,7 @@ namespace NetNode
 					serverCallbacks.Value.OnError();
 				}
 
-				if(failedListenerSockets == serverListenerPool.Count || Filters.ApplyFilter<bool>(endpointAddress, param.endpoint.Port, typeof(Filter.Essential), false))
+				if(failedListenerSockets == potentialOpenListenerSockets || Filters.ApplyFilter<bool>(endpointAddress, param.endpoint.Port, typeof(Filter.Essential), false))
 				{
 					this.StopServer();
 				}
@@ -207,8 +203,6 @@ namespace NetNode
 				{
 					serverSocketPool.Remove(entry.Value);
 				}
-				
-				serverListenerPool.Remove(param.thread);
 			}
 		}
 
@@ -276,9 +270,17 @@ namespace NetNode
 									}
 								}
 							}
+							else
+							{
+								break;
+							}
 						}
-						catch(SocketException)
+						catch(SocketException se)
 						{
+							if(se.SocketErrorCode == SocketError.ConnectionAborted || se.SocketErrorCode == SocketError.ConnectionReset)
+							{
+								break;
+							}
 							continue;
 						}
 					}
