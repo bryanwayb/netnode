@@ -110,6 +110,10 @@ namespace NetNode
 				sock.Connect(param.endpoint);
 
 				ipLink = new NodePortIPLink(param.endpoint.Address.GetAddressBytes(), param.endpoint.Port);
+
+				sock.ReceiveTimeout = Filters.ApplyFilter<int>(ipLink.Value, typeof(Filter.SocketPollTimeout), 0);
+				sock.SendTimeout = sock.ReceiveTimeout; // TODO: There may be a reason to make these seperate, but until that comes leaving them as one and the same
+
 				entry = new SocketPoolEntry(sock);
 				clientSocketPool.Add(ipLink.Value, entry.Value);
 				openClientSockets++;
@@ -136,7 +140,7 @@ namespace NetNode
 					throw ex;
 				}
 			}
-			catch(Exception)
+			catch(Exception ex)
 			{
 				failedClientSockets++;
 
@@ -155,7 +159,7 @@ namespace NetNode
 					}
 				}
 
-				if(clientCallbacks.Value.OnError != null) // Try to call generic error handler otherwise.
+				if(clientCallbacks.Value.OnSocketError == null && !(ex is SocketException) && clientCallbacks.Value.OnError != null) // Try to call generic error handler otherwise.
 				{
 					clientCallbacks.Value.OnError();
 				}
@@ -165,7 +169,7 @@ namespace NetNode
 		}
 
 		private object clientSocketProcessLock = new object();
-		private void ClientSocketProcess(NodePortIPLink ipLink, SocketPoolEntry entry)
+		private void ClientSocketProcess(SocketPoolEntry entry, NodePortIPLink ipLink)
 		{
 			new Thread(delegate()
 			{
@@ -183,6 +187,7 @@ namespace NetNode
 				}
 
 				int pingDelay = Filters.ApplyFilter<int>(ipLink, typeof(Filter.KeepAlivePing), 3000);
+				int pollTimeout = Filters.ApplyFilter<int>(ipLink, typeof(Filter.SocketPollTimeout), -1);
 
 				// This acts as the heartbeat to the server. Consistantly ping the server to keep the connection alive.
 				while(clientStatus == ClientStatus.Starting || clientStatus == ClientStatus.Started)
@@ -191,21 +196,16 @@ namespace NetNode
 					{
 						lock(entry.sLock)
 						{
-							bool connected = false;
-							if(connected = (entry.socket.Poll(-1, SelectMode.SelectWrite) && entry.socket.Connected)) // TODO: Make timeout configurable (in microseconds)
+							if(entry.socket.Poll(pollTimeout, SelectMode.SelectWrite) && entry.socket.Connected) // TODO: Make timeout configurable (in microseconds)
 							{
 								byte[] buffer = new byte[] { (byte)InitPayloadFlag.Ping };
-								if(entry.socket.Send(buffer) != 1 || entry.socket.Receive(buffer) != 1)
+								if(entry.socket.Send(buffer) == buffer.Length)
 								{
-									connected = false;
+									if(entry.socket.Receive(buffer) != buffer.Length)
+									{
+										break;
+									}
 								}
-							}
-
-							if(!connected) // Attempt a reconnect
-							{
-								entry.isVerified = false;
-								ClientConnectToNode(ipLink, entry);
-								break;
 							}
 						}
 					}
@@ -258,7 +258,7 @@ namespace NetNode
 						d("CLIENT", "\t" + "node server verified");
 
 						entry.isVerified = true;
-						ClientSocketProcess(ipLink, entry);
+						ClientSocketProcess(entry, ipLink);
 					}
 				}
 			}

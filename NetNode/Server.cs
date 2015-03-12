@@ -23,6 +23,8 @@ namespace NetNode
 		public Action OnStop;															// When the server is stopped and all sockets are closed
 		public Action<SocketPoolEntry, NodePortIPLink> OnSocketConnect;					// When socket is connected. Parameter is the SocketPoolEntry
 		public Action<SocketPoolEntry, NodePortIPLink> OnSocketDisconnect;				// When socket is disconnected. Parameter is the SocketPoolEntry
+		public Action<SocketPoolEntry, NodePortIPLink> OnSocketBind;					// Called as soon as the a socket is bound to an IP and port
+		public Action<SocketPoolEntry, NodePortIPLink> OnSocketUnbind;					// Called when a socket is closed
 		public Action OnError;															// A generic error has occured.
 		public Action<SocketPoolEntry, NodePortIPLink, SocketError> OnSocketError;		// A socket error occured, parameters are the SocketPoolEntry and the SocketError code that is passed in the exception.
 	}
@@ -116,6 +118,7 @@ namespace NetNode
 
 			bool bindEstablished = false;
 			SocketPoolEntry? entry = null;
+			NodePortIPLink? ipLink = null;
 			byte[] endpointAddress = param.endpoint.Address.GetAddressBytes();
 			try
 			{
@@ -124,8 +127,17 @@ namespace NetNode
 				socketListener.Bind(param.endpoint);
 				socketListener.Listen(Filters.ApplyFilter<int>(endpointAddress, param.endpoint.Port, typeof(Filter.MaxPendingQueue), 10));
 
+				ipLink = new NodePortIPLink(param.endpoint.Address.GetAddressBytes(), param.endpoint.Port);
+				socketListener.ReceiveTimeout = Filters.ApplyFilter<int>(ipLink.Value, typeof(Filter.SocketPollTimeout), 0);
+				socketListener.SendTimeout = socketListener.ReceiveTimeout;
+
 				entry = new SocketPoolEntry(socketListener);
 				serverSocketPool.Add(entry.Value);
+
+				if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketBind != null)
+				{
+					serverCallbacks.Value.OnSocketBind(entry.Value, ipLink.Value);
+				}
 
 				bindEstablished = true;
 				lock(listenerThreadLock)
@@ -166,11 +178,7 @@ namespace NetNode
 								bufferSize = incomming.Send(bufferReverse);
 								if(bufferSize == bufferReverse.Length)
 								{
-									if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketConnect != null)
-									{
-										serverCallbacks.Value.OnSocketConnect(entry.Value, new NodePortIPLink(param.endpoint.Address.GetAddressBytes(), param.endpoint.Port));
-									}
-									ServerSocketProcess(new SocketPoolEntry(incomming)); // Start active connection with client
+									ServerSocketProcess(new SocketPoolEntry(incomming), ipLink.Value); // Start active connection with client
 								}
 							}
 						}
@@ -183,7 +191,7 @@ namespace NetNode
 
 				openListenerSockets--;
 			}
-			catch(Exception)
+			catch(Exception ex)
 			{
 				if(bindEstablished)
 				{
@@ -191,9 +199,16 @@ namespace NetNode
 				}
 				failedListenerSockets++;
 
-				if(serverCallbacks.HasValue && serverCallbacks.Value.OnError != null)
+				if(serverCallbacks.HasValue)
 				{
-					serverCallbacks.Value.OnError();
+					if(serverCallbacks.Value.OnSocketError != null && ipLink.HasValue && ex is SocketException)
+					{
+						serverCallbacks.Value.OnSocketError(entry.Value, ipLink.Value, ((SocketException)ex).SocketErrorCode);
+					}
+					else if(serverCallbacks.Value.OnError != null)
+					{
+						serverCallbacks.Value.OnError();
+					}
 				}
 
 				if(failedListenerSockets == potentialOpenListenerSockets || Filters.ApplyFilter<bool>(endpointAddress, param.endpoint.Port, typeof(Filter.Essential), false))
@@ -221,12 +236,18 @@ namespace NetNode
 			}
 		}
 
-		private void ServerSocketProcess(SocketPoolEntry entry)
+		private void ServerSocketProcess(SocketPoolEntry entry, NodePortIPLink ipLink)
 		{
 			// Spawn a new thread for established connections.
 			new Thread(delegate()
 			{
 				activeListenerConnections++;
+
+				if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketConnect != null)
+				{
+					serverCallbacks.Value.OnSocketConnect(entry, ipLink);
+				}
+
 				lock(entry.sLock) // There actually isn't a reason to do this right now. TODO: Remove this lock if still unneeded in future.
 				{
 					while(serverStatus == ServerStatus.Starting || serverStatus == ServerStatus.Started)
@@ -290,18 +311,36 @@ namespace NetNode
 								break;
 							}
 						}
-						catch(SocketException)
+						catch(SocketException se)
 						{
-							/*if(se.SocketErrorCode == SocketError.ConnectionAborted || se.SocketErrorCode == SocketError.ConnectionReset)
+							if(serverCallbacks.HasValue)
 							{
-								break;
+								if(serverCallbacks.Value.OnSocketError != null)
+								{
+									serverCallbacks.Value.OnSocketError(entry, ipLink, se.SocketErrorCode);
+								}
+								else if(serverCallbacks.Value.OnError != null)
+								{
+									serverCallbacks.Value.OnError();
+								}
 							}
-							continue;*/
 							break;
 						}
 					}
 				}
+
+				// Poll for connection and send disconnect from client if one exists
+				if(entry.socket.Poll(Filters.ApplyFilter<int>(ipLink, typeof(Filter.SocketPollTimeout), -1), SelectMode.SelectRead) && entry.socket.Connected)
+				{
+					entry.socket.Disconnect(false);
+				}
+
 				activeListenerConnections--;
+
+				if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketDisconnect != null)
+				{
+					serverCallbacks.Value.OnSocketDisconnect(entry, ipLink);
+				}
 			}).Start();
 		}
 
@@ -314,6 +353,10 @@ namespace NetNode
 				foreach(SocketPoolEntry entry in serverSocketPool)
 				{
 					entry.socket.Close();
+					if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketUnbind != null)
+					{
+						//serverCallbacks.Value.OnSocketUnbind(entry, entry.ipLink); // TODO: Fix this
+					}
 				}
 				serverSocketPool.Clear();
 			}

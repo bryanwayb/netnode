@@ -48,6 +48,14 @@ namespace TestApplication
 				OnSocketError = delegate(SocketPoolEntry entry, NodePortIPLink link, SocketError error)
 				{
 					Console.WriteLine("Server socket error on " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port + ": " + error.ToString());
+				},
+				OnSocketBind = delegate(SocketPoolEntry entry, NodePortIPLink link)
+				{
+					Console.WriteLine("Socket bound");
+				},
+				OnSocketUnbind = delegate(SocketPoolEntry entry, NodePortIPLink link)
+				{
+					Console.WriteLine("Socket unbound");
 				}
 			});
 			NetNode.Node.Default.AddListener("ThisIsATest", delegate(byte[] param)
@@ -73,8 +81,8 @@ namespace TestApplication
 					
 					new Thread(delegate()
 					{
-						Thread.Sleep(5000); // Sleep for 5 seconds
-						Node.Default.StopServer(); // Then stop the server. This will cause the client to lose connectivity (but it won't stop the client).
+						Thread.Sleep(5000);
+						Node.Default.StopServer();
 					}).Start();
 				},
 				OnStop = delegate()

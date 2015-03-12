@@ -19,4 +19,34 @@ namespace NetNode.Filter
 			return (T)Convert.ChangeType(ImportantConnection, typeof(T));
 		}
 	}
+
+	public struct ConnectionTimeout : Base
+	{
+		public int Milliseconds;
+
+		public ConnectionTimeout(int Milliseconds)
+		{
+			this.Milliseconds = Milliseconds;
+		}
+
+		public T ApplyFilter<T>(object param)
+		{
+			return (T)Convert.ChangeType(Milliseconds, typeof(T));
+		}
+	}
+
+	public struct SocketPollTimeout : Base
+	{
+		public int Microseconds;
+
+		public SocketPollTimeout(int Microseconds)
+		{
+			this.Microseconds = Microseconds;
+		}
+
+		public T ApplyFilter<T>(object param)
+		{
+			return (T)Convert.ChangeType(Microseconds, typeof(T));
+		}
+	}
 }
