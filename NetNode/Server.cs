@@ -18,9 +18,13 @@ namespace NetNode
 
 	public struct ServerCallbacks
 	{
-		public Action OnStart;
-		public Action OnStop;
-		public Action OnError;
+		public Action<ServerStatus> OnStartError;										// There was an error starting the server. Parameter is the current ServerStatus
+		public Action OnStart;															// Called after the server has started
+		public Action OnStop;															// When the server is stopped and all sockets are closed
+		public Action<SocketPoolEntry, NodePortIPLink> OnSocketConnect;					// When socket is connected. Parameter is the SocketPoolEntry
+		public Action<SocketPoolEntry, NodePortIPLink> OnSocketDisconnect;				// When socket is disconnected. Parameter is the SocketPoolEntry
+		public Action OnError;															// A generic error has occured.
+		public Action<SocketPoolEntry, NodePortIPLink, SocketError> OnSocketError;		// A socket error occured, parameters are the SocketPoolEntry and the SocketError code that is passed in the exception.
 	}
 
 	public partial class Node
@@ -83,7 +87,14 @@ namespace NetNode
 				d("SERVER", "Server starting");
 				if(serverStatus != ServerStatus.Stopped)
 				{
-					throw new InvalidOperationException("NetNode server can only be started from a stopped state");
+					if(serverCallbacks.HasValue && serverCallbacks.Value.OnStartError != null)
+					{
+						serverCallbacks.Value.OnStartError(serverStatus);
+					}
+					else
+					{
+						throw new InvalidOperationException("NetNode server can only be started from a stopped state");
+					}
 				}
 				else if(BindableIPs != null && (potentialOpenListenerSockets = BindableIPs.Count) > 0)
 				{
@@ -133,7 +144,7 @@ namespace NetNode
 
 				d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " connection open to incomming connections");
 
-				while(serverStatus != ServerStatus.Stopping)
+				while(serverStatus == ServerStatus.Starting || serverStatus == ServerStatus.Started)
 				{
 					d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " ...waiting to connect...");
 					lock(entry.Value.sLock) // Lock accepting connections on this socket until the last connection is finished processing. We don't want our incomming data to be mixed up and cause a failure, or worse.
@@ -155,6 +166,10 @@ namespace NetNode
 								bufferSize = incomming.Send(bufferReverse);
 								if(bufferSize == bufferReverse.Length)
 								{
+									if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketConnect != null)
+									{
+										serverCallbacks.Value.OnSocketConnect(entry.Value, new NodePortIPLink(param.endpoint.Address.GetAddressBytes(), param.endpoint.Port));
+									}
 									ServerSocketProcess(new SocketPoolEntry(incomming)); // Start active connection with client
 								}
 							}
@@ -214,7 +229,7 @@ namespace NetNode
 				activeListenerConnections++;
 				lock(entry.sLock) // There actually isn't a reason to do this right now. TODO: Remove this lock if still unneeded in future.
 				{
-					while(serverStatus != ServerStatus.Stopping)
+					while(serverStatus == ServerStatus.Starting || serverStatus == ServerStatus.Started)
 					{
 						try
 						{
@@ -275,13 +290,14 @@ namespace NetNode
 								break;
 							}
 						}
-						catch(SocketException se)
+						catch(SocketException)
 						{
-							if(se.SocketErrorCode == SocketError.ConnectionAborted || se.SocketErrorCode == SocketError.ConnectionReset)
+							/*if(se.SocketErrorCode == SocketError.ConnectionAborted || se.SocketErrorCode == SocketError.ConnectionReset)
 							{
 								break;
 							}
-							continue;
+							continue;*/
+							break;
 						}
 					}
 				}

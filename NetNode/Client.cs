@@ -18,8 +18,13 @@ namespace NetNode
 
 	public struct ClientCallbacks
 	{
-		public Action OnStart;
-		public Action OnStop;
+		public Action<ClientStatus> OnStartError;										// There was an error starting the client. Parameter is the current ClientStatus
+		public Action OnStart;															// Called after the NetNode client has started
+		public Action OnStop;															// When the client is stopped and all sockets are closed
+		public Action<SocketPoolEntry, NodePortIPLink> OnSocketConnect;					// When socket is connected. Parameter is the SocketPoolEntry
+		public Action<SocketPoolEntry, NodePortIPLink> OnSocketDisconnect;				// When socket is disconnected. Parameter is the SocketPoolEntry
+		public Action OnError;															// A generic error has occured. TODO: Perhaps pass a custom error code detailing what when wrong?
+		public Action<SocketPoolEntry, NodePortIPLink, SocketError> OnSocketError;		// A socket error occured, parameters are the SocketPoolEntry and the SocketError code that is passed in the exception.
 	}
 
 	public partial class Node
@@ -69,9 +74,16 @@ namespace NetNode
 			lock(this)
 			{
 				d("CLIENT", "Client starting");
-				if(clientStatus != ClientStatus.Stopped)
+				if(clientStatus != ClientStatus.Stopped) // Prevent eating up resouces
 				{
-					throw new InvalidOperationException("NetNode client can only be started from a stopped state");
+					if(clientCallbacks.HasValue && clientCallbacks.Value.OnStartError != null)
+					{
+						clientCallbacks.Value.OnStartError(clientStatus);
+					}
+					else
+					{
+						throw new InvalidOperationException("NetNode client can only be started from a stopped state");
+					}
 				}
 				else if(ConnectableIPs != null && (potentialOpenClientSockets = ConnectableIPs.Count) > 0)
 				{
@@ -103,12 +115,25 @@ namespace NetNode
 				openClientSockets++;
 				try
 				{
+					if(clientCallbacks.HasValue && clientCallbacks.Value.OnSocketConnect != null)
+					{
+						clientCallbacks.Value.OnSocketConnect(entry.Value, ipLink.Value);
+					}
 					ClientConnectToNode(ipLink.Value, entry.Value);
 				}
-				catch(SocketException)
+				catch(Exception ex)
 				{
 					openClientSockets--;
-					throw new Exception();
+
+					if(clientCallbacks.HasValue)
+					{
+						if(clientCallbacks.Value.OnSocketError != null && ex is SocketException) // Call this if a socket error handler has been assigned
+						{
+							clientCallbacks.Value.OnSocketError(entry.Value, ipLink.Value, ((SocketException)ex).SocketErrorCode);
+						}
+					}
+
+					throw ex;
 				}
 			}
 			catch(Exception)
@@ -121,8 +146,18 @@ namespace NetNode
 
 					if(ipLink.HasValue)
 					{
+						if(clientCallbacks.HasValue && clientCallbacks.Value.OnSocketDisconnect != null)
+						{
+							clientCallbacks.Value.OnSocketDisconnect(entry.Value, ipLink.Value);
+						}
+
 						clientSocketPool.Remove(ipLink.Value);
 					}
+				}
+
+				if(clientCallbacks.Value.OnError != null) // Try to call generic error handler otherwise.
+				{
+					clientCallbacks.Value.OnError();
 				}
 
 				ClientCheckIfStopNeeded();
@@ -150,7 +185,7 @@ namespace NetNode
 				int pingDelay = Filters.ApplyFilter<int>(ipLink, typeof(Filter.KeepAlivePing), 3000);
 
 				// This acts as the heartbeat to the server. Consistantly ping the server to keep the connection alive.
-				while(clientStatus != ClientStatus.Stopping)
+				while(clientStatus == ClientStatus.Starting || clientStatus == ClientStatus.Started)
 				{
 					try
 					{
@@ -185,6 +220,11 @@ namespace NetNode
 				if(entry.socket.Connected)
 				{
 					entry.socket.Close();
+
+					if(clientCallbacks.HasValue && clientCallbacks.Value.OnSocketDisconnect != null)
+					{
+						clientCallbacks.Value.OnSocketDisconnect(entry, ipLink);
+					}
 				}
 
 				// The socket is due to be cleaned up at this point.
@@ -254,12 +294,17 @@ namespace NetNode
 				foreach(KeyValuePair<NodePortIPLink, SocketPoolEntry> entry in clientSocketPool)
 				{
 					entry.Value.socket.Close();
+
+					if(clientCallbacks.HasValue && clientCallbacks.Value.OnSocketDisconnect != null)
+					{
+						clientCallbacks.Value.OnSocketDisconnect(entry.Value, entry.Key);
+					}
 				}
 				clientSocketPool.Clear();
 			}
 		}
 
-		/*public byte[] ClientExecuteFunction(NodePortIPLink iplink, string signature, byte[] data)
+		public byte[] ClientExecuteFunction(NodePortIPLink iplink, string signature, byte[] data)
 		{
 			if(clientSocketPool.ContainsKey(iplink))
 			{
@@ -302,10 +347,17 @@ namespace NetNode
 			}
 			else
 			{
-				throw new Exception("Socket is not open");
+				if(clientCallbacks.HasValue && clientCallbacks.Value.OnError != null)
+				{
+					clientCallbacks.Value.OnError();
+				}
+				else
+				{
+					throw new Exception("Socket is not open");
+				}
 			}
 
 			return null;
-		}*/
+		}
 	}
 }

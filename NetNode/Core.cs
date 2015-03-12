@@ -89,7 +89,7 @@ namespace NetNode
 		FunctionPayload = 0x1,	// Performs function on the server
 	}
 
-	struct SocketPoolEntry
+	public struct SocketPoolEntry
 	{
 		public SocketPoolEntry(Socket socket)
 		{
