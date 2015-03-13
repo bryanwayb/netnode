@@ -49,7 +49,7 @@ namespace NetNode
 		}
 
 		private ServerStatus serverStatus = ServerStatus.Stopped;
-		private HashSet<SocketPoolEntry> serverSocketPool = new HashSet<SocketPoolEntry>();
+		private Dictionary<NodePortIPLink, SocketPoolEntry> serverSocketPool = new Dictionary<NodePortIPLink, SocketPoolEntry>(new NodePortIPLinkArrayComparer()); // As of right now, this would be better off as a Hashset, but we need NodePortIPLink to coreleate with SocketPoolEntry and would like to not create a redundency by including it in the structure.
 		private ServerCallbacks? serverCallbacks = null;
 
 		private int activeListenerConnections = 0;
@@ -132,7 +132,7 @@ namespace NetNode
 				socketListener.SendTimeout = socketListener.ReceiveTimeout;
 
 				entry = new SocketPoolEntry(socketListener);
-				serverSocketPool.Add(entry.Value);
+				serverSocketPool.Add(ipLink.Value, entry.Value);
 
 				if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketBind != null)
 				{
@@ -229,9 +229,9 @@ namespace NetNode
 					}
 				}
 
-				if(entry.HasValue)
+				if(ipLink.HasValue)
 				{
-					serverSocketPool.Remove(entry.Value);
+					serverSocketPool.Remove(ipLink.Value);
 				}
 			}
 		}
@@ -350,12 +350,12 @@ namespace NetNode
 			{
 				serverStatus = ServerStatus.Stopping;
 
-				foreach(SocketPoolEntry entry in serverSocketPool)
+				foreach(KeyValuePair<NodePortIPLink, SocketPoolEntry> entry in serverSocketPool)
 				{
-					entry.socket.Close();
+					entry.Value.socket.Close();
 					if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketUnbind != null)
 					{
-						//serverCallbacks.Value.OnSocketUnbind(entry, entry.ipLink); // TODO: Fix this
+						serverCallbacks.Value.OnSocketUnbind(entry.Value, entry.Key);
 					}
 				}
 				serverSocketPool.Clear();
