@@ -31,11 +31,6 @@ namespace NetNode
 
 	public partial class Node
 	{
-		private void d(string s, string t)
-		{
-			Console.WriteLine("[{0}]: {1}", s, t);
-		}
-
 		private struct ServerListenerParameter
 		{
 			public ServerListenerParameter(Node instance, IPEndPoint endpoint)
@@ -86,7 +81,6 @@ namespace NetNode
 		{
 			lock(this)
 			{
-				d("SERVER", "Server starting");
 				if(serverStatus != ServerStatus.Stopped)
 				{
 					if(serverCallbacks.HasValue && serverCallbacks.Value.OnStartError != null)
@@ -113,8 +107,6 @@ namespace NetNode
 		private void ServerListenerThread(object obj)
 		{
 			ServerListenerParameter param = (ServerListenerParameter)obj;
-
-			d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " listener starting");
 
 			bool bindEstablished = false;
 			SocketPoolEntry? entry = null;
@@ -157,17 +149,13 @@ namespace NetNode
 					}
 				}
 
-				d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " connection open to incomming connections");
-
 				while(serverStatus == ServerStatus.Starting || serverStatus == ServerStatus.Started)
 				{
-					d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " ...waiting to connect...");
 					lock(entry.Value.sLock) // Lock accepting connections on this socket until the last connection is finished processing. We don't want our incomming data to be mixed up and cause a failure, or worse.
 					{
 						try
 						{
 							Socket incomming = socketListener.Accept(); // Suspect to cause hanging? TODO: Detech a server stop here
-							d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " incomming connection established");
 
 							byte[] buffer = new byte[NodeMagicPayload.Length]; // Expect the magic payload. This will say if the request came from a Node server. We don't check it here though, that's up to the client.
 							int bufferSize = incomming.Receive(buffer);
@@ -262,7 +250,6 @@ namespace NetNode
 						{
 							byte[] buffer = new byte[1];
 							int bufferSize = entry.socket.Receive(buffer);
-							d("SERVER", "\tProcessing...");
 							if(bufferSize == buffer.Length)
 							{
 								if(buffer[0] == (byte)InitPayloadFlag.Ping)
@@ -280,7 +267,6 @@ namespace NetNode
 										bufferSize = entry.socket.Receive(buffer);
 										if(bufferSize == buffer.Length)
 										{
-											d("SERVER", "\tprocessing function...");
 											try
 											{
 												NodePayload payload = new NodePayload(buffer);
@@ -313,7 +299,6 @@ namespace NetNode
 								}
 								else if(buffer[0] == (byte)InitPayloadFlag.RequestAsServer)
 								{
-									d("SERVER", "Receiving client as server request");
 									buffer = new byte[sizeof(int)];
 									bufferSize = entry.socket.Receive(buffer);
 									if(bufferSize == buffer.Length)

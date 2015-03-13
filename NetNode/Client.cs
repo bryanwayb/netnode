@@ -73,7 +73,6 @@ namespace NetNode
 		{
 			lock(this)
 			{
-				d("CLIENT", "Client starting");
 				if(clientStatus != ClientStatus.Stopped) // Prevent eating up resouces
 				{
 					if(clientCallbacks.HasValue && clientCallbacks.Value.OnStartError != null)
@@ -126,8 +125,6 @@ namespace NetNode
 		private void ClientRunnerThread(object obj)
 		{
 			ClientRunnerParameter param = (ClientRunnerParameter)obj;
-
-			d("CLIENT", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " client starting");
 
 			SocketPoolEntry? entry = null;
 			NodePortIPLink? ipLink = null;
@@ -254,11 +251,11 @@ namespace NetNode
 				if(entry.socket.Connected)
 				{
 					entry.socket.Close();
+				}
 
-					if(clientCallbacks.HasValue && clientCallbacks.Value.OnSocketDisconnect != null)
-					{
-						clientCallbacks.Value.OnSocketDisconnect(entry, ipLink);
-					}
+				if(clientCallbacks.HasValue && clientCallbacks.Value.OnSocketDisconnect != null)
+				{
+					clientCallbacks.Value.OnSocketDisconnect(entry, ipLink);
 				}
 
 				// The socket is due to be cleaned up at this point.
@@ -269,7 +266,6 @@ namespace NetNode
 
 		private void ClientConnectToNode(NodePortIPLink ipLink, SocketPoolEntry entry)
 		{
-			d("CLIENT", "\t" + "sending init");
 			int bufferSize = entry.socket.Send(NodeMagicPayload);
 			if(bufferSize == NodeMagicPayload.Length)
 			{
@@ -289,8 +285,6 @@ namespace NetNode
 
 					if(valid)
 					{
-						d("CLIENT", "\t" + "node server verified");
-
 						entry.isVerified = true;
 						ClientSocketProcess(entry, ipLink);
 					}
@@ -357,12 +351,10 @@ namespace NetNode
 							bufferSize = entry.socket.Send(buffer);
 							if(bufferSize == buffer.Length)
 							{
-								d("CLIENT", "sent action");
 								buffer = new byte[sizeof(int)];
 								bufferSize = entry.socket.Receive(buffer);
 								if(bufferSize == buffer.Length)
 								{
-									d("CLIENT", "\tchecking for response data");
 									int responseSize = BitConverter.ToInt32(buffer, 0);
 									if(responseSize > 0)
 									{
@@ -401,7 +393,6 @@ namespace NetNode
 				SocketPoolEntry entry = clientSocketPool[ipLink];
 				lock(entry.sLock)
 				{
-					d("CLIENT", "Requesting to be server");
 					int bufferSize = entry.socket.Send(new byte[] { (byte)InitPayloadFlag.RequestAsServer });
 					if(bufferSize == sizeof(byte))
 					{

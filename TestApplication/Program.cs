@@ -6,108 +6,138 @@ using System.Threading;
 using System.Threading.Tasks;
 using NetNode;
 using System.Net.Sockets;
+using System.Net;
 
 namespace TestApplication
 {
 	class Program
 	{
-		static void Main(string[] args)
+		static void Main(String[] args)
 		{
-			NodeIP localIP = new NodeIP(new byte[] { 127, 0, 0, 1 }, 9090);
-			NodePortIPLink localIPPortLink = new NodePortIPLink(localIP.ip, 9090);
-
-			// Setup server
-			Node.Default.AddNodeIP(new NodeIP(new byte[] { 127, 0, 0, 1 }, new int[] { 9090, 9091 }), NodeIPType.Bindable);
-			Filters.AddFilter(localIPPortLink, new NetNode.Filter.Essential(true));
-			Node.Default.SetServerCallbacks(new ServerCallbacks()
+			NodeIP ipConfig = new NodeIP();
+			bool asServer = false; // Default to client
+			for(int i = 0;i < args.Length; i++)
 			{
-				OnStartError = delegate(ServerStatus status)
+				String currentArg = args[i].Trim().ToLower();
+
+				if(currentArg == "-h" || currentArg == "--host")
 				{
-					Console.WriteLine("Server start failed. Client status: " + status.ToString());
-				},
-				OnStart = delegate()
-				{
-					Console.WriteLine("Server started");
-				},
-				OnStop = delegate()
-				{
-					Console.WriteLine("Server stopped");
-				},
-				OnSocketConnect = delegate(SocketPoolEntry entry, NodePortIPLink link)
-				{
-					Console.WriteLine("Server connected to " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b));
-				},
-				OnSocketDisconnect = delegate(SocketPoolEntry entry, NodePortIPLink link)
-				{
-					Console.WriteLine("Server disconnected from " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b));
-				},
-				OnError = delegate()
-				{
-					Console.WriteLine("Server encountered an error");
-				},
-				OnSocketError = delegate(SocketPoolEntry entry, NodePortIPLink link, SocketError error)
-				{
-					Console.WriteLine("Server socket error on " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port + ": " + error.ToString());
-				},
-				OnSocketBind = delegate(SocketPoolEntry entry, NodePortIPLink link)
-				{
-					Console.WriteLine("Socket bound");
-				},
-				OnSocketUnbind = delegate(SocketPoolEntry entry, NodePortIPLink link)
-				{
-					Console.WriteLine("Socket unbound");
+					ipConfig.ip = Dns.GetHostEntry(args[++i]).AddressList[0].GetAddressBytes();
 				}
-			});
-			NetNode.Node.Default.AddListener("ThisIsATest", delegate(byte[] param)
-			{
-				Console.WriteLine("This is a remote function being executed on the server");
-				return null;
-			});
-			Node.Default.StartServer();
-
-			// Setup the client
-			Node.Default.AddNodeIP(localIP, NodeIPType.Connectable);
-			Node.Default.SetClientCallbacks(new ClientCallbacks()
-			{
-				OnStartError = delegate(ClientStatus status)
+				else if(currentArg == "-i" || currentArg == "--ip")
 				{
-					Console.WriteLine("Client start failed. Client status: " + status.ToString());
-				},
-				OnStart = delegate()
+					ipConfig.ip = IPAddress.Parse(args[++i]).GetAddressBytes();
+				}
+				else if(currentArg == "-p" || currentArg == "--port")
 				{
-					Console.WriteLine("Client started");
+					ipConfig.ports = new int[] { Int32.Parse(args[++i]) };
+				}
+				else if(currentArg == "-s" || currentArg == "--server")
+				{
+					asServer = true;
+				}
+				else if(currentArg == "-c" || currentArg == "--client")
+				{
+					asServer = false;
+				}
+			}
 
-					Node.Default.EnableClientAsServer(localIPPortLink, new NodePortIPLink(localIP.ip, 9091)); // The second parameter is optional. When it's not included, the server will use the existing client connection as a "server" connection. When a NodePortIPLink is specified, it will create a new connection (even if it's the same IP and port as the client). That is intentional.
-					Node.Default.ClientExecuteFunction(localIPPortLink, "ThisIsATest", null); // Executes remote function
-					
-					new Thread(delegate()
+			Console.WriteLine("NetNode Example\nRunning with the following configuration...\n------------");
+
+			Console.WriteLine("IP Address: " + ipConfig.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b));
+			Console.WriteLine("Port: " + ipConfig.ports[0]);
+			Console.WriteLine("Mode: " + (asServer ? "Server" : "Client"));
+
+			if(asServer)
+			{
+				NetNode.Node.Default.AddListener("ExampleRemoteFunction", delegate(byte[] param)
+				{
+					Console.WriteLine("This is an example function that was called from the client.");
+					return null;
+				});
+
+				Node.Default.SetServerCallbacks(new ServerCallbacks()
+				{
+					OnStartError = delegate(ServerStatus status)
 					{
-						Thread.Sleep(5000);
-						Node.Default.StopServer();
-					}).Start();
-				},
-				OnStop = delegate()
+						Console.WriteLine("Server start failed. Client status: " + status.ToString());
+					},
+					OnStart = delegate()
+					{
+						Console.WriteLine("Server started");
+					},
+					OnStop = delegate()
+					{
+						Console.WriteLine("Server stopped");
+					},
+					OnSocketConnect = delegate(SocketPoolEntry entry, NodePortIPLink link)
+					{
+						Console.WriteLine("Server connected to " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port);
+					},
+					OnSocketDisconnect = delegate(SocketPoolEntry entry, NodePortIPLink link)
+					{
+						Console.WriteLine("Server disconnected from " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port);
+					},
+					OnError = delegate()
+					{
+						Console.WriteLine("Server encountered an error");
+					},
+					OnSocketError = delegate(SocketPoolEntry entry, NodePortIPLink link, SocketError error)
+					{
+						Console.WriteLine("Server socket error on " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port + ": " + error.ToString());
+					},
+					OnSocketBind = delegate(SocketPoolEntry entry, NodePortIPLink link)
+					{
+						Console.WriteLine("Server bound to " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port);
+					},
+					OnSocketUnbind = delegate(SocketPoolEntry entry, NodePortIPLink link)
+					{
+						Console.WriteLine("Server unbound from " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port);
+					}
+				});
+
+				Node.Default.AddNodeIP(ipConfig, NodeIPType.Bindable);
+				Node.Default.StartServer();
+			}
+			else
+			{
+				Node.Default.SetClientCallbacks(new ClientCallbacks()
 				{
-					Console.WriteLine("Client stopped");
-				},
-				OnSocketConnect = delegate(SocketPoolEntry entry, NodePortIPLink link)
-				{
-					Console.WriteLine("Client connected to " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b));
-				},
-				OnSocketDisconnect = delegate(SocketPoolEntry entry, NodePortIPLink link)
-				{
-					Console.WriteLine("Client disconnected from " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b));
-				},
-				OnError = delegate()
-				{
-					Console.WriteLine("Client encountered an error");
-				},
-				OnSocketError = delegate(SocketPoolEntry entry, NodePortIPLink link, SocketError error)
-				{
-					Console.WriteLine("Client socket error on " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port + ": " + error.ToString());
-				}
-			});
-			Node.Default.ClientStart();
+					OnStartError = delegate(ClientStatus status)
+					{
+						Console.WriteLine("Client start failed. Client status: " + status.ToString());
+					},
+					OnStart = delegate()
+					{
+						Console.WriteLine("Client started");
+
+						Node.Default.ClientExecuteFunction(new NodePortIPLink(ipConfig.ip, ipConfig.ports[0]), "ExampleRemoteFunction", null);
+					},
+					OnStop = delegate()
+					{
+						Console.WriteLine("Client stopped");
+					},
+					OnSocketConnect = delegate(SocketPoolEntry entry, NodePortIPLink link)
+					{
+						Console.WriteLine("Client connected to " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port);
+					},
+					OnSocketDisconnect = delegate(SocketPoolEntry entry, NodePortIPLink link)
+					{
+						Console.WriteLine("Client disconnected from " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port);
+					},
+					OnError = delegate()
+					{
+						Console.WriteLine("Client encountered an error");
+					},
+					OnSocketError = delegate(SocketPoolEntry entry, NodePortIPLink link, SocketError error)
+					{
+						Console.WriteLine("Client socket error on " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port + ": " + error.ToString());
+					}
+				});
+
+				Node.Default.AddNodeIP(ipConfig, NodeIPType.Connectable);
+				Node.Default.ClientStart();
+			}
 		}
 	}
 }
