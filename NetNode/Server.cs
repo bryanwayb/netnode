@@ -132,7 +132,10 @@ namespace NetNode
 				socketListener.SendTimeout = socketListener.ReceiveTimeout;
 
 				entry = new SocketPoolEntry(socketListener);
-				serverSocketPool.Add(ipLink.Value, entry.Value);
+				lock(this)
+				{
+					serverSocketPool.Add(ipLink.Value, entry.Value);
+				}
 
 				if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketBind != null)
 				{
@@ -163,7 +166,7 @@ namespace NetNode
 					{
 						try
 						{
-							Socket incomming = socketListener.Accept();
+							Socket incomming = socketListener.Accept(); // Suspect to cause hanging? TODO: Detech a server stop here
 							d("SERVER", param.endpoint.Address.ToString() + ":" + param.endpoint.Port + " incomming connection established");
 
 							byte[] buffer = new byte[NodeMagicPayload.Length]; // Expect the magic payload. This will say if the request came from a Node server. We don't check it here though, that's up to the client.
@@ -231,7 +234,10 @@ namespace NetNode
 
 				if(ipLink.HasValue)
 				{
-					serverSocketPool.Remove(ipLink.Value);
+					lock(this)
+					{
+						serverSocketPool.Remove(ipLink.Value);
+					}
 				}
 			}
 		}
@@ -305,6 +311,40 @@ namespace NetNode
 										}
 									}
 								}
+								else if(buffer[0] == (byte)InitPayloadFlag.RequestAsServer)
+								{
+									d("SERVER", "Receiving client as server request");
+									buffer = new byte[sizeof(int)];
+									bufferSize = entry.socket.Receive(buffer);
+									if(bufferSize == buffer.Length)
+									{
+										int payloadSize = BitConverter.ToInt32(buffer, 0);
+										if(payloadSize > 0) // First check if an IP has been sent
+										{
+											buffer = new byte[payloadSize];
+											bufferSize = entry.socket.Receive(buffer);
+											if(bufferSize == buffer.Length)
+											{
+												byte[] ip = buffer;
+												// Got the IP address, now get the port
+												buffer = new byte[sizeof(int)];
+												bufferSize = entry.socket.Receive(buffer);
+												if(bufferSize == buffer.Length)
+												{
+													int port = BitConverter.ToInt32(buffer, 0);
+
+													AddNodeIP(ip, port, NodeIPType.Connectable);
+													ClientHotStart();
+												}
+											}
+										}
+										else
+										{
+											// We'll just treat the existing connection as a server instead of creating a new connection.
+											// TODO: Do that.
+										}
+									}
+								}
 							}
 							else
 							{
@@ -352,10 +392,13 @@ namespace NetNode
 
 				foreach(KeyValuePair<NodePortIPLink, SocketPoolEntry> entry in serverSocketPool)
 				{
-					entry.Value.socket.Close();
-					if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketUnbind != null)
+					if(entry.Value.socket != null)
 					{
-						serverCallbacks.Value.OnSocketUnbind(entry.Value, entry.Key);
+						entry.Value.socket.Close();
+						if(serverCallbacks.HasValue && serverCallbacks.Value.OnSocketUnbind != null)
+						{
+							serverCallbacks.Value.OnSocketUnbind(entry.Value, entry.Key);
+						}
 					}
 				}
 				serverSocketPool.Clear();

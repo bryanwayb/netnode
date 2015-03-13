@@ -87,6 +87,7 @@ namespace NetNode
 	{
 		Ping = 0x0,				// Ping connectivity, does essentially nothing aside from an echo of 0x0.
 		FunctionPayload = 0x1,	// Performs function on the server
+		RequestAsServer = 0x2,	// Send signal to server asking for server functionality (i.e. receive requests from server acting as a client).
 	}
 
 	public struct SocketPoolEntry

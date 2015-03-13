@@ -69,7 +69,7 @@ namespace NetNode
 			return failedClientSockets;
 		}
 
-		public void StartClient()
+		public void ClientStart()
 		{
 			lock(this)
 			{
@@ -88,10 +88,37 @@ namespace NetNode
 				else if(ConnectableIPs != null && (potentialOpenClientSockets = ConnectableIPs.Count) > 0)
 				{
 					clientStatus = ClientStatus.Starting;
-					foreach(IPEndPoint endpoint in BindableIPs)
+					foreach(IPEndPoint endpoint in ConnectableIPs)
 					{
 						new Thread(ClientRunnerThread).Start(new ClientRunnerParameter(this, endpoint));
 					}
+				}
+			}
+		}
+
+		public void ClientHotStart() // Same thing as ClientStart, except this will only start endpoints that haven't been started yet.
+		{
+			// TODO: It might be worth it just to fuse this with the standard ClientStart() function. Maybe have a boolean variable to signal a hot start, or just have it hot start by default. Will decide on this...
+			lock(this)
+			{
+				if(clientStatus == ClientStatus.Started)
+				{
+					foreach(IPEndPoint endpoint in ConnectableIPs)
+					{
+						NodePortIPLink ipLink = new NodePortIPLink(endpoint.Address.GetAddressBytes(), endpoint.Port);
+						if(!clientSocketPool.ContainsKey(ipLink))
+						{
+							new Thread(ClientRunnerThread).Start(new ClientRunnerParameter(this, endpoint));
+						}
+					}
+				}
+				else if(clientStatus != ClientStatus.Stopped)
+				{
+					ClientStart();
+				}
+				else
+				{
+					// TODO: Error here?
 				}
 			}
 		}
@@ -115,7 +142,11 @@ namespace NetNode
 				sock.SendTimeout = sock.ReceiveTimeout; // TODO: There may be a reason to make these seperate, but until that comes leaving them as one and the same
 
 				entry = new SocketPoolEntry(sock);
-				clientSocketPool.Add(ipLink.Value, entry.Value);
+				lock(this)
+				{
+					clientSocketPool.Add(ipLink.Value, entry.Value);
+				}
+				
 				openClientSockets++;
 				try
 				{
@@ -155,7 +186,10 @@ namespace NetNode
 							clientCallbacks.Value.OnSocketDisconnect(entry.Value, ipLink.Value);
 						}
 
-						clientSocketPool.Remove(ipLink.Value);
+						lock(this)
+						{
+							clientSocketPool.Remove(ipLink.Value);
+						}
 					}
 				}
 
@@ -270,7 +304,7 @@ namespace NetNode
 			{
 				if(failedClientSockets == potentialOpenClientSockets)
 				{
-					this.StopClient();
+					this.ClientStop();
 				}
 
 				if(openClientSockets == 0)
@@ -285,7 +319,7 @@ namespace NetNode
 			}
 		}
 
-		public void StopClient()
+		public void ClientStop()
 		{
 			lock(this)
 			{
@@ -358,6 +392,50 @@ namespace NetNode
 			}
 
 			return null;
+		}
+
+		public bool EnableClientAsServer(NodePortIPLink ipLink, NodePortIPLink? ipBind = null)
+		{
+			if(clientSocketPool.ContainsKey(ipLink))
+			{
+				SocketPoolEntry entry = clientSocketPool[ipLink];
+				lock(entry.sLock)
+				{
+					d("CLIENT", "Requesting to be server");
+					int bufferSize = entry.socket.Send(new byte[] { (byte)InitPayloadFlag.RequestAsServer });
+					if(bufferSize == sizeof(byte))
+					{
+						// Here we'll tell the server either to connected to a specific IP address from where the request came from or if it should use the already open connection.
+						byte[] buffer = null;
+						if(ipBind.HasValue)
+						{
+							// First send IP
+							buffer = BitConverter.GetBytes(ipBind.Value.ip.Length); // IP size (usually 4 or 6 bytes)
+							bufferSize = entry.socket.Send(buffer);
+							if(bufferSize == buffer.Length)
+							{
+								buffer = ipBind.Value.ip;
+								bufferSize = entry.socket.Send(buffer); // The actual IP address
+								if(bufferSize == buffer.Length)
+								{
+									// Now send port
+									entry.socket.Send(BitConverter.GetBytes(ipBind.Value.port));
+								}
+							}
+						}
+						else
+						{
+							entry.socket.Send(BitConverter.GetBytes(0)); // There's nothing to send here
+						}
+
+						// 
+					}
+				}
+
+				return true;
+			}
+
+			return false;
 		}
 	}
 }

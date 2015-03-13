@@ -17,7 +17,7 @@ namespace TestApplication
 			NodePortIPLink localIPPortLink = new NodePortIPLink(localIP.ip, 9090);
 
 			// Setup server
-			Node.Default.AddNodeIP(localIP, NodeIPType.Bindable);
+			Node.Default.AddNodeIP(new NodeIP(new byte[] { 127, 0, 0, 1 }, new int[] { 9090, 9091 }), NodeIPType.Bindable);
 			Filters.AddFilter(localIPPortLink, new NetNode.Filter.Essential(true));
 			Node.Default.SetServerCallbacks(new ServerCallbacks()
 			{
@@ -77,6 +77,7 @@ namespace TestApplication
 				{
 					Console.WriteLine("Client started");
 
+					Node.Default.EnableClientAsServer(localIPPortLink, new NodePortIPLink(localIP.ip, 9091)); // The second parameter is optional. When it's not included, the server will use the existing client connection as a "server" connection. When a NodePortIPLink is specified, it will create a new connection (even if it's the same IP and port as the client). That is intentional.
 					Node.Default.ClientExecuteFunction(localIPPortLink, "ThisIsATest", null); // Executes remote function
 					
 					new Thread(delegate()
@@ -106,7 +107,7 @@ namespace TestApplication
 					Console.WriteLine("Client socket error on " + link.ip.Select(s => s.ToString()).Aggregate((a, b) => a + "." + b) + ":" + link.port + ": " + error.ToString());
 				}
 			});
-			Node.Default.StartClient();
+			Node.Default.ClientStart();
 		}
 	}
 }
