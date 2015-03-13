@@ -369,10 +369,13 @@ namespace NetNode
 					}
 				}
 
-				// Poll for connection and send disconnect from client if one exists
-				if(entry.socket.Poll(Filters.ApplyFilter<int>(ipLink, typeof(Filter.SocketPollTimeout), -1), SelectMode.SelectRead) && entry.socket.Connected)
+				lock(this)
 				{
-					entry.socket.Disconnect(false);
+					// Poll for connection and send disconnect from client if one exists
+					if(entry.socket.Poll(Filters.ApplyFilter<int>(ipLink, typeof(Filter.SocketPollTimeout), -1), SelectMode.SelectRead) && entry.socket.Connected)
+					{
+						entry.socket.Disconnect(false);
+					}
 				}
 
 				activeListenerConnections--;
