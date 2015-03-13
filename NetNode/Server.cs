@@ -338,11 +338,6 @@ namespace NetNode
 												}
 											}
 										}
-										else
-										{
-											// We'll just treat the existing connection as a server instead of creating a new connection.
-											// TODO: Do that.
-										}
 									}
 								}
 							}

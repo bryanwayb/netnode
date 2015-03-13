@@ -394,7 +394,7 @@ namespace NetNode
 			return null;
 		}
 
-		public bool EnableClientAsServer(NodePortIPLink ipLink, NodePortIPLink? ipBind = null)
+		public bool EnableClientAsServer(NodePortIPLink ipLink, NodePortIPLink ipBind)
 		{
 			if(clientSocketPool.ContainsKey(ipLink))
 			{
@@ -405,30 +405,19 @@ namespace NetNode
 					int bufferSize = entry.socket.Send(new byte[] { (byte)InitPayloadFlag.RequestAsServer });
 					if(bufferSize == sizeof(byte))
 					{
-						// Here we'll tell the server either to connected to a specific IP address from where the request came from or if it should use the already open connection.
-						byte[] buffer = null;
-						if(ipBind.HasValue)
+						// First send IP
+						byte[] buffer = BitConverter.GetBytes(ipBind.ip.Length); // IP size (likely 4 or 6 bytes)
+						bufferSize = entry.socket.Send(buffer);
+						if(bufferSize == buffer.Length)
 						{
-							// First send IP
-							buffer = BitConverter.GetBytes(ipBind.Value.ip.Length); // IP size (usually 4 or 6 bytes)
-							bufferSize = entry.socket.Send(buffer);
+							buffer = ipBind.ip;
+							bufferSize = entry.socket.Send(buffer); // The actual IP address
 							if(bufferSize == buffer.Length)
 							{
-								buffer = ipBind.Value.ip;
-								bufferSize = entry.socket.Send(buffer); // The actual IP address
-								if(bufferSize == buffer.Length)
-								{
-									// Now send port
-									entry.socket.Send(BitConverter.GetBytes(ipBind.Value.port));
-								}
+								// Now send port
+								entry.socket.Send(BitConverter.GetBytes(ipBind.port));
 							}
 						}
-						else
-						{
-							entry.socket.Send(BitConverter.GetBytes(0)); // There's nothing to send here
-						}
-
-						// 
 					}
 				}
 
