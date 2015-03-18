@@ -77,7 +77,7 @@ namespace NetNode
 			return failedListenerSockets;
 		}
 
-		public void StartServer()
+		public void ServerStart()
 		{
 			lock(this)
 			{
