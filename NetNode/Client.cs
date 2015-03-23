@@ -48,6 +48,7 @@ namespace NetNode
 		private int potentialOpenClientSockets = 0;
 		private int openClientSockets = 0;
 		private int failedClientSockets = 0;
+		private int serverAsClientConnections = 0;
 
 		public void SetClientCallbacks(ClientCallbacks clientCallbacks)
 		{
@@ -84,7 +85,7 @@ namespace NetNode
 						throw new InvalidOperationException("NetNode client can only be started from a stopped state");
 					}
 				}
-				else if(ConnectableIPs != null && (potentialOpenClientSockets = ConnectableIPs.Count) > 0)
+				else if(ConnectableIPs != null && (potentialOpenClientSockets = ConnectableIPs.Count + serverAsClientConnections) > 0)
 				{
 					clientStatus = ClientStatus.Starting;
 					foreach(IPEndPoint endpoint in ConnectableIPs)
@@ -111,7 +112,7 @@ namespace NetNode
 						}
 					}
 				}
-				else if(clientStatus != ClientStatus.Stopped)
+				else if(clientStatus != ClientStatus.Stopping)
 				{
 					ClientStart();
 				}
@@ -227,7 +228,7 @@ namespace NetNode
 					{
 						lock(entry.sLock)
 						{
-							if(entry.socket.Poll(pollTimeout, SelectMode.SelectWrite) && entry.socket.Connected) // TODO: Make timeout configurable (in microseconds)
+							if(entry.socket.Poll(pollTimeout, SelectMode.SelectWrite) && entry.socket.Connected)
 							{
 								byte[] buffer = new byte[] { (byte)InitPayloadFlag.Ping };
 								if(entry.socket.Send(buffer) == buffer.Length)
@@ -260,6 +261,13 @@ namespace NetNode
 
 				// The socket is due to be cleaned up at this point.
 				openClientSockets--;
+
+				if(entry.type == SocketPoolEntryType.ServerAsClient)
+				{
+					clientSocketPool.Remove(ipLink);
+					serverAsClientConnections--;
+				}
+				 
 				ClientCheckIfStopNeeded();
 			}).Start();
 		}
@@ -286,7 +294,24 @@ namespace NetNode
 					if(valid)
 					{
 						entry.isVerified = true;
-						ClientSocketProcess(entry, ipLink);
+						if(!Filters.ApplyFilter<bool>(ipLink, typeof(Filter.ClientAsServer), false))
+						{
+							buffer = new byte[1] { (byte)InitConnectionFlag.Default };
+							bufferSize = entry.socket.Send(buffer);
+							if(bufferSize == buffer.Length)
+							{
+								ClientSocketProcess(entry, ipLink);
+							}
+						}
+						else
+						{
+							buffer = new byte[1] { (byte)InitConnectionFlag.ConnectAsServer };
+							bufferSize = entry.socket.Send(buffer);
+							if(bufferSize == buffer.Length)
+							{
+								ConnectAsServer(entry, ipLink);
+							}
+						}
 					}
 				}
 			}
@@ -416,6 +441,25 @@ namespace NetNode
 			}
 
 			return false;
+		}
+
+		private void ConnectAsClient(SocketPoolEntry entry, NodePortIPLink ipLink)
+		{
+			entry.type = SocketPoolEntryType.ServerAsClient;
+			lock(this)
+			{
+				clientSocketPool.Add(ipLink, entry);
+			}
+			openClientSockets++;
+			serverAsClientConnections++;
+			ClientHotStart();
+
+			if(clientCallbacks.HasValue && clientCallbacks.Value.OnSocketConnect != null)
+			{
+				clientCallbacks.Value.OnSocketConnect(entry, ipLink);
+			}
+
+			ClientSocketProcess(entry, ipLink);
 		}
 	}
 }

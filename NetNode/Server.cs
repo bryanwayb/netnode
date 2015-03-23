@@ -51,6 +51,7 @@ namespace NetNode
 		private int potentialOpenListenerSockets = 0;
 		private int openListenerSockets = 0;
 		private int failedListenerSockets = 0;
+		private int clientAsServerConnections = 0;
 
 		public void SetServerCallbacks(ServerCallbacks serverCallbacks)
 		{
@@ -92,13 +93,39 @@ namespace NetNode
 						throw new InvalidOperationException("NetNode server can only be started from a stopped state");
 					}
 				}
-				else if(BindableIPs != null && (potentialOpenListenerSockets = BindableIPs.Count) > 0)
+				else if(BindableIPs != null && (potentialOpenListenerSockets = (BindableIPs.Count + clientAsServerConnections)) > 0)
 				{
 					serverStatus = ServerStatus.Starting;
 					foreach(IPEndPoint endpoint in BindableIPs)
 					{
 						new Thread(ServerListenerThread).Start(new ServerListenerParameter(this, endpoint));
 					}
+				}
+			}
+		}
+
+		public void ServerHotStart() // Same thing as ClientHotStart.
+		{
+			lock(this)
+			{
+				if(serverStatus == ServerStatus.Started)
+				{
+					foreach(IPEndPoint endpoint in BindableIPs)
+					{
+						NodePortIPLink ipLink = new NodePortIPLink(endpoint.Address.GetAddressBytes(), endpoint.Port);
+						if(!serverSocketPool.ContainsKey(ipLink))
+						{
+							new Thread(ServerListenerThread).Start(new ServerListenerParameter(this, endpoint));
+						}
+					}
+				}
+				else if(serverStatus != ServerStatus.Stopping)
+				{
+					ServerStart();
+				}
+				else
+				{
+					// TODO: Error?
 				}
 			}
 		}
@@ -159,7 +186,7 @@ namespace NetNode
 
 							byte[] buffer = new byte[NodeMagicPayload.Length]; // Expect the magic payload. This will say if the request came from a Node server. We don't check it here though, that's up to the client.
 							int bufferSize = incomming.Receive(buffer);
-							if(bufferSize == buffer.Length)
+							if(bufferSize == buffer.Length && Lib.memcmp(buffer, NodeMagicPayload, bufferSize) == 0) // Verify that request came from Node client and protocols are compatiable.
 							{
 								byte[] bufferReverse = new byte[bufferSize]; // Reverse here to verify on the client end
 								for(int i = 0;i < bufferSize;i++)
@@ -169,7 +196,21 @@ namespace NetNode
 								bufferSize = incomming.Send(bufferReverse);
 								if(bufferSize == bufferReverse.Length)
 								{
-									ServerSocketProcess(new SocketPoolEntry(incomming), ipLink.Value); // Start active connection with client
+									buffer = new byte[1];
+									bufferSize = incomming.Receive(buffer);
+									if(bufferSize == buffer.Length)
+									{
+										SocketPoolEntry incommingEntry = new SocketPoolEntry(incomming);
+										incommingEntry.isVerified = true;
+										if(buffer[0] == (byte)InitConnectionFlag.Default)
+										{
+											ServerSocketProcess(incommingEntry, ipLink.Value); // Start active connection with client
+										}
+										else if(buffer[0] == (byte)InitConnectionFlag.ConnectAsServer)
+										{
+											ConnectAsClient(incommingEntry, ipLink.Value);
+										}
+									}
 								}
 							}
 						}
@@ -386,6 +427,19 @@ namespace NetNode
 				}
 				serverSocketPool.Clear();
 			}
+		}
+
+		private void ConnectAsServer(SocketPoolEntry entry, NodePortIPLink ipLink)
+		{
+			entry.type = SocketPoolEntryType.ClientAsServer;
+			lock(this)
+			{
+				serverSocketPool.Add(ipLink, entry);
+			}
+			clientAsServerConnections++;
+			ServerHotStart();
+
+			ServerSocketProcess(entry, ipLink);
 		}
 	}
 }

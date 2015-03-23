@@ -83,11 +83,24 @@ namespace NetNode
 		public byte[] data;				// Payload data to pass to NodeFunc
 	}
 
+	public enum InitConnectionFlag : byte // A flag the's sent only once by a client and directly after initial connection to a Node server.
+	{
+		Default = 0x0,			// Default client to server functionality
+		ConnectAsServer = 0x1	// The incomming connection from the client should instead be treated as a server by the NetNode instance
+	}
+
 	public enum InitPayloadFlag : byte // These are actions that are to be executed on a node server.
 	{
 		Ping = 0x0,				// Ping connectivity, does essentially nothing aside from an echo of 0x0.
 		FunctionPayload = 0x1,	// Performs function on the server
 		RequestAsServer = 0x2,	// Send signal to server asking for server functionality (i.e. receive requests from server acting as a client).
+	}
+
+	public enum SocketPoolEntryType
+	{
+		Default = 0x0,			// Treat as a normal socket entry
+		ServerAsClient = 0x1,	// Socket is being used as a client on a server connection
+		ClientAsServer = 0x2	// Socket is being used as a server on a client connection
 	}
 
 	public struct SocketPoolEntry
@@ -97,18 +110,20 @@ namespace NetNode
 			this.socket = socket;
 			sLock = new object();
 			isVerified = false;
+			type = SocketPoolEntryType.Default;
 		}
 
 		public Socket socket;
 		public object sLock;
 		public bool isVerified; // Use by the client portion of NetNode
+		public SocketPoolEntryType type;
 	}
 
 	public partial class Node
 	{
 		public static Node Default = new Node();
 
-		private static byte[] NodeMagicPayload = new byte[4] { (byte)'n', (byte)'o', (byte)'d', (byte)'e' };
+		private static byte[] NodeMagicPayload = new byte[] { (byte)'n', (byte)'o', (byte)'d', (byte)'e', (byte)'v', (byte)'0', (byte)'.', (byte)'1' }; // "Magic" value used to identify NetNode protocol version. Mismatched versions will fail to connect.
 		
 		private Encoding Encoder = Encoding.UTF8;
 		public void SetEncoder(Encoding encoder)
