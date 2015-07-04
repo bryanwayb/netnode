@@ -1,4 +1,14 @@
+Notice
+==
+This project has been superseded by [NodeSocket for C#](https://github.com/bryanwayb/nodesocket-csharp), as a simpler take on the same concept. This has been left here for documentation purposes only and is no longer maintained.
+
+Other links that may be useful:
+* [NodeSocket for NodeJS](https://github.com/bryanwayb/nodesocket-nodejs)
+* [NodeSocket for web browsers (using websockets)](https://github.com/bryanwayb/nodesocket-browserify)
+*  [NodeSocket for PHP](https://github.com/bryanwayb/nodesocket-php)
+
 # NetNode
+
 NetNode aims to be an extensible cross language library for implementing network communication as self contained nodes.
 
 Note: This project is currently in **Alpha** and is under active development.
